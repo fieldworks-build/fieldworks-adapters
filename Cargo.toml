@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "fieldworks-adapter-core",
+    "mqtt-mcp",
+    "opcua-mcp",
+    "modbus-mcp",
+    "dnp3-mcp",
+    "ethernetip-mcp",
+    "aveva-mcp",
+]
+resolver = "2"

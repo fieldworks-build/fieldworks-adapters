@@ -1,0 +1,7 @@
+[package]
+name = "aveva-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fieldworks-adapter-core = { path = "../fieldworks-adapter-core" }
