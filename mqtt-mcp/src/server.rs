@@ -7,13 +7,9 @@ use crate::connection::{
 use chrono::{SecondsFormat, Utc};
 use fieldworks_adapter_core::*;
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{
-        CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
-    },
-    schemars,
-    tool, tool_handler, tool_router,
+    model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
+    schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde_json::json;
@@ -34,11 +30,9 @@ struct ConnectParams {
     port: u16,
     #[schemars(description = "Connection timeout in milliseconds. Default 5000.")]
     timeout_ms: Option<u32>,
-    #[schemars(
-        description = "Protocol-specific options object. Supported keys: \
+    #[schemars(description = "Protocol-specific options object. Supported keys: \
         client_id (string), username (string), password (string), \
-        keep_alive_secs (integer), clean_session (bool)."
-    )]
+        keep_alive_secs (integer), clean_session (bool).")]
     options: Option<serde_json::Value>,
 }
 
@@ -86,7 +80,9 @@ struct GetTopicTreeParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ReadTagParams {
-    #[schemars(description = "Tag identifier (MQTT topic path) as returned by discover_tags or scan.")]
+    #[schemars(
+        description = "Tag identifier (MQTT topic path) as returned by discover_tags or scan."
+    )]
     tag_id: String,
 }
 
@@ -182,10 +178,17 @@ impl MqttMcpServer {
 impl MqttMcpServer {
     // ── connect ───────────────────────────────────────────────────────────────
 
-    #[tool(description = "Establish connection to the MQTT broker. If already connected, the existing connection is replaced.")]
+    #[tool(
+        description = "Establish connection to the MQTT broker. If already connected, the existing connection is replaced."
+    )]
     async fn connect(
         &self,
-        Parameters(ConnectParams { host, port, timeout_ms, options }): Parameters<ConnectParams>,
+        Parameters(ConnectParams {
+            host,
+            port,
+            timeout_ms,
+            options,
+        }): Parameters<ConnectParams>,
     ) -> Result<CallToolResult, McpError> {
         let mut inner = self.inner.lock().await;
 
@@ -213,8 +216,7 @@ impl MqttMcpServer {
             .unwrap_or(true);
         mqtt_opts.set_clean_session(clean_session);
 
-        if let (Some(u), Some(p)) = (opt_str(&options, "username"), opt_str(&options, "password"))
-        {
+        if let (Some(u), Some(p)) = (opt_str(&options, "username"), opt_str(&options, "password")) {
             mqtt_opts.set_credentials(u, p);
         }
 
@@ -299,10 +301,8 @@ impl MqttMcpServer {
 
     // ── disconnect ────────────────────────────────────────────────────────────
 
-    #[tool(
-        description = "Cleanly terminate the connection to the MQTT broker. \
-        Sends MQTT DISCONNECT before closing."
-    )]
+    #[tool(description = "Cleanly terminate the connection to the MQTT broker. \
+        Sends MQTT DISCONNECT before closing.")]
     async fn disconnect(
         &self,
         Parameters(DisconnectParams { reason }): Parameters<DisconnectParams>,
@@ -344,9 +344,11 @@ impl MqttMcpServer {
     )]
     async fn discover_tags(
         &self,
-        Parameters(DiscoverTagsParams { process_area, equipment_id, include_metadata: _ }): Parameters<
-            DiscoverTagsParams,
-        >,
+        Parameters(DiscoverTagsParams {
+            process_area,
+            equipment_id,
+            include_metadata: _,
+        }): Parameters<DiscoverTagsParams>,
     ) -> Result<CallToolResult, McpError> {
         let inner = self.inner.lock().await;
         match inner.as_ref() {
@@ -361,7 +363,11 @@ impl MqttMcpServer {
                         .map(vqt_to_descriptor)
                         .collect()
                 } else {
-                    conn.topology.tags.iter().map(topology_tag_to_descriptor).collect()
+                    conn.topology
+                        .tags
+                        .iter()
+                        .map(topology_tag_to_descriptor)
+                        .collect()
                 };
 
                 // Apply filters.
@@ -372,7 +378,9 @@ impl MqttMcpServer {
                     tags.retain(|t| &t.equipment_id == eq);
                 }
 
-                Ok(CallToolResult::structured(serde_json::to_value(&tags).unwrap_or(json!([]))))
+                Ok(CallToolResult::structured(
+                    serde_json::to_value(&tags).unwrap_or(json!([])),
+                ))
             }
         }
     }
@@ -386,7 +394,10 @@ impl MqttMcpServer {
     )]
     async fn scan(
         &self,
-        Parameters(ScanParams { topic_pattern, scan_duration_ms }): Parameters<ScanParams>,
+        Parameters(ScanParams {
+            topic_pattern,
+            scan_duration_ms,
+        }): Parameters<ScanParams>,
     ) -> Result<CallToolResult, McpError> {
         let (client, msg_tx) = {
             let inner = self.inner.lock().await;
@@ -450,7 +461,10 @@ impl MqttMcpServer {
     )]
     async fn get_topic_tree(
         &self,
-        Parameters(GetTopicTreeParams { topic_prefix, include_values }): Parameters<GetTopicTreeParams>,
+        Parameters(GetTopicTreeParams {
+            topic_prefix,
+            include_values,
+        }): Parameters<GetTopicTreeParams>,
     ) -> Result<CallToolResult, McpError> {
         let (client, msg_tx) = {
             let inner = self.inner.lock().await;
@@ -488,8 +502,7 @@ impl MqttMcpServer {
                 match rx.recv().await {
                     Ok(msg) => {
                         let leaf = if include_vals {
-                            let vqt =
-                                parse_mqtt_payload(&msg.topic, &msg.payload, &msg.timestamp);
+                            let vqt = parse_mqtt_payload(&msg.topic, &msg.payload, &msg.timestamp);
                             json!({
                                 "tag_id": vqt.tag_id,
                                 "value": vqt.value,
@@ -566,14 +579,18 @@ impl MqttMcpServer {
         match result {
             Ok(Some(msg)) => {
                 let vqt = parse_mqtt_payload(&msg.topic, &msg.payload, &msg.timestamp);
-                Ok(CallToolResult::structured(serde_json::to_value(&vqt).unwrap()))
+                Ok(CallToolResult::structured(
+                    serde_json::to_value(&vqt).unwrap(),
+                ))
             }
             Ok(None) | Err(_) => {
                 // Timeout: check the cache as a last resort (may have a value from a prior scan).
                 if let Some(cached) = cache.read().unwrap().get(&tag_id) {
                     let mut vqt = cached.clone();
                     vqt.quality = Quality::Uncertain; // stale
-                    return Ok(CallToolResult::structured(serde_json::to_value(&vqt).unwrap()));
+                    return Ok(CallToolResult::structured(
+                        serde_json::to_value(&vqt).unwrap(),
+                    ));
                 }
                 Ok(fw_error(AdapterError {
                     code: ErrorCode::Timeout,
@@ -589,12 +606,10 @@ impl MqttMcpServer {
 
     // ── read_tag_history ──────────────────────────────────────────────────────
 
-    #[tool(
-        description = "Read a time-series for a tag over a defined window. \
+    #[tool(description = "Read a time-series for a tag over a defined window. \
         MQTT v3.1.1 does not provide native history. This adapter returns \
         HISTORY_UNAVAILABLE. Integrate a MQTT-backed historian (e.g. InfluxDB bridge) \
-        and extend this method to support historical queries."
-    )]
+        and extend this method to support historical queries.")]
     async fn read_tag_history(
         &self,
         Parameters(ReadTagHistoryParams { tag_id, .. }): Parameters<ReadTagHistoryParams>,
@@ -617,9 +632,13 @@ impl MqttMcpServer {
     )]
     async fn write_tag(
         &self,
-        Parameters(WriteTagParams { tag_id, value, units, operator_id, reason }): Parameters<
-            WriteTagParams,
-        >,
+        Parameters(WriteTagParams {
+            tag_id,
+            value,
+            units,
+            operator_id,
+            reason,
+        }): Parameters<WriteTagParams>,
     ) -> Result<CallToolResult, McpError> {
         let (client, topology_perm) = {
             let inner = self.inner.lock().await;

@@ -101,20 +101,17 @@ pub struct TopologyConfig {
 pub fn load_topology() -> TopologyConfig {
     let candidates = ["topology.yaml", "topology.yml", "../topology.yaml"];
     for path in &candidates {
-        match std::fs::read_to_string(path) {
-            Ok(content) => match serde_yaml::from_str::<TopologyConfig>(&content) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            match serde_yaml::from_str::<TopologyConfig>(&content) {
                 Ok(config) => {
                     tracing::info!("loaded topology from {path}");
                     return config;
                 }
                 Err(e) => tracing::warn!("failed to parse {path}: {e}"),
-            },
-            Err(_) => {}
+            }
         }
     }
-    tracing::warn!(
-        "no topology.yaml found — discover_tags returns scan cache; all writes denied"
-    );
+    tracing::warn!("no topology.yaml found — discover_tags returns scan cache; all writes denied");
     TopologyConfig::default()
 }
 
@@ -215,7 +212,13 @@ pub fn parse_mqtt_payload(topic: &str, payload: &str, timestamp: &str) -> Vqt {
                 .and_then(|u| u.as_str())
                 .unwrap_or("")
                 .to_string();
-            return Vqt { tag_id: topic.to_string(), value, quality, timestamp: ts, units };
+            return Vqt {
+                tag_id: topic.to_string(),
+                value,
+                quality,
+                timestamp: ts,
+                units,
+            };
         }
     }
 
@@ -294,10 +297,10 @@ pub fn topology_tag_to_descriptor(t: &TopologyTag) -> TagDescriptor {
         writable: t.writable,
         process_area: t.process_area.clone(),
         equipment_id: t.equipment_id.clone(),
-        normal_range: t
-            .normal_range
-            .as_ref()
-            .map(|r| NormalRange { min: r.min, max: r.max }),
+        normal_range: t.normal_range.as_ref().map(|r| NormalRange {
+            min: r.min,
+            max: r.max,
+        }),
     }
 }
 
@@ -310,7 +313,12 @@ pub fn vqt_to_descriptor(vqt: &Vqt) -> TagDescriptor {
     .to_string();
     TagDescriptor {
         tag_id: vqt.tag_id.clone(),
-        name: vqt.tag_id.split('/').last().unwrap_or(&vqt.tag_id).to_string(),
+        name: vqt
+            .tag_id
+            .split('/')
+            .next_back()
+            .unwrap_or(&vqt.tag_id)
+            .to_string(),
         description: String::new(),
         units: vqt.units.clone(),
         data_type,
@@ -372,7 +380,9 @@ pub fn validate_write(
             if f < min {
                 return Err(AdapterError {
                     code: ErrorCode::InvalidValue,
-                    message: format!("Value {f} is below the configured minimum {min} for '{tag_id}'."),
+                    message: format!(
+                        "Value {f} is below the configured minimum {min} for '{tag_id}'."
+                    ),
                     tag_id: Some(tag_id.to_string()),
                 });
             }
@@ -381,7 +391,9 @@ pub fn validate_write(
             if f > max {
                 return Err(AdapterError {
                     code: ErrorCode::InvalidValue,
-                    message: format!("Value {f} exceeds the configured maximum {max} for '{tag_id}'."),
+                    message: format!(
+                        "Value {f} exceeds the configured maximum {max} for '{tag_id}'."
+                    ),
                     tag_id: Some(tag_id.to_string()),
                 });
             }
@@ -392,7 +404,8 @@ pub fn validate_write(
     } else {
         return Err(AdapterError {
             code: ErrorCode::InvalidValue,
-            message: "write_tag value must be a number or boolean. String values are not writable.".into(),
+            message: "write_tag value must be a number or boolean. String values are not writable."
+                .into(),
             tag_id: Some(tag_id.to_string()),
         });
     };
@@ -505,7 +518,9 @@ mod tests {
     #[test]
     fn payload_bool_aliases_false() {
         // "0" parses as f64 first, so only word-form aliases reach the bool branch
-        for s in ["false", "False", "FALSE", "off", "OFF", "closed", "inactive", "low"] {
+        for s in [
+            "false", "False", "FALSE", "off", "OFF", "closed", "inactive", "low",
+        ] {
             let vqt = parse_mqtt_payload("t", s, ts());
             assert!(
                 matches!(vqt.value, TagValue::Bool(false)),
@@ -657,4 +672,3 @@ mod tests {
         let _ = config.tags.len();
     }
 }
-

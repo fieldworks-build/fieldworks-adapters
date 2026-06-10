@@ -237,7 +237,10 @@ mod tests {
     #[test]
     fn quality_serializes_snake_case() {
         assert_eq!(serde_json::to_string(&Quality::Good).unwrap(), "\"good\"");
-        assert_eq!(serde_json::to_string(&Quality::Uncertain).unwrap(), "\"uncertain\"");
+        assert_eq!(
+            serde_json::to_string(&Quality::Uncertain).unwrap(),
+            "\"uncertain\""
+        );
         assert_eq!(serde_json::to_string(&Quality::Bad).unwrap(), "\"bad\"");
     }
 
@@ -260,8 +263,14 @@ mod tests {
 
     #[test]
     fn tag_value_bool_is_bare_bool() {
-        assert_eq!(serde_json::to_string(&TagValue::Bool(true)).unwrap(), "true");
-        assert_eq!(serde_json::to_string(&TagValue::Bool(false)).unwrap(), "false");
+        assert_eq!(
+            serde_json::to_string(&TagValue::Bool(true)).unwrap(),
+            "true"
+        );
+        assert_eq!(
+            serde_json::to_string(&TagValue::Bool(false)).unwrap(),
+            "false"
+        );
     }
 
     #[test]
@@ -325,11 +334,17 @@ mod tests {
 
     #[test]
     fn write_value_float_is_bare_number() {
-        assert_eq!(serde_json::to_string(&WriteValue::Float(1.5)).unwrap(), "1.5");
+        assert_eq!(
+            serde_json::to_string(&WriteValue::Float(1.5)).unwrap(),
+            "1.5"
+        );
     }
 
     #[test]
     fn write_value_bool_is_bare_bool() {
-        assert_eq!(serde_json::to_string(&WriteValue::Bool(true)).unwrap(), "true");
+        assert_eq!(
+            serde_json::to_string(&WriteValue::Bool(true)).unwrap(),
+            "true"
+        );
     }
 }

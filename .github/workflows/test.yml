@@ -26,6 +26,12 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
       - name: cargo test (unit only)
         run: cargo test --workspace
         # Integration tests require MQTT_TEST_HOST / OPCUA_TEST_HOST.

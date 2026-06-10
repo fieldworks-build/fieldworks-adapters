@@ -13,11 +13,9 @@ use async_opcua::{
 use chrono::{SecondsFormat, Utc};
 use fieldworks_adapter_core::*;
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
-    schemars,
-    tool, tool_handler, tool_router,
+    schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -65,9 +63,13 @@ const CAPABILITIES: &[&str] = &[
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ConnectParams {
-    #[schemars(description = "OPC-UA endpoint URL or hostname. If it starts with opc.tcp:// it is used as-is; otherwise opc.tcp://<host>:<port> is constructed.")]
+    #[schemars(
+        description = "OPC-UA endpoint URL or hostname. If it starts with opc.tcp:// it is used as-is; otherwise opc.tcp://<host>:<port> is constructed."
+    )]
     host: String,
-    #[schemars(description = "Port number. Default 4840. Ignored if host is a full opc.tcp:// URL.")]
+    #[schemars(
+        description = "Port number. Default 4840. Ignored if host is a full opc.tcp:// URL."
+    )]
     port: Option<u16>,
     #[schemars(description = "Connection and session timeout in milliseconds. Default 10000.")]
     timeout_ms: Option<u32>,
@@ -118,7 +120,9 @@ struct ReadTagParams {
 struct ReadTagHistoryParams {
     #[schemars(description = "OPC-UA NodeId string.")]
     tag_id: String,
-    #[schemars(description = "Start of history window. ISO 8601 UTC. Example: 2026-06-09T00:00:00Z")]
+    #[schemars(
+        description = "Start of history window. ISO 8601 UTC. Example: 2026-06-09T00:00:00Z"
+    )]
     start_time: String,
     #[schemars(description = "End of history window. ISO 8601 UTC.")]
     end_time: String,
@@ -134,7 +138,9 @@ struct WriteTagParams {
     tag_id: String,
     #[schemars(description = "Value to write. Number or boolean. Strings not accepted.")]
     value: serde_json::Value,
-    #[schemars(description = "Engineering units. Must match the write_permissions entry if one is configured.")]
+    #[schemars(
+        description = "Engineering units. Must match the write_permissions entry if one is configured."
+    )]
     units: String,
     #[schemars(description = "Operator identity for the audit log.")]
     operator_id: String,
@@ -161,7 +167,9 @@ impl OpcUaMcpServer {
 
     // ── connect ───────────────────────────────────────────────────────────────
 
-    #[tool(description = "Establish an OPC-UA session. Supports SecurityMode None/Sign/SignAndEncrypt and Anonymous or Username/Password identity. Tag IDs are OPC-UA NodeId strings (e.g. ns=2;s=Pump01.FlowRate).")]
+    #[tool(
+        description = "Establish an OPC-UA session. Supports SecurityMode None/Sign/SignAndEncrypt and Anonymous or Username/Password identity. Tag IDs are OPC-UA NodeId strings (e.g. ns=2;s=Pump01.FlowRate)."
+    )]
     async fn connect(
         &self,
         Parameters(p): Parameters<ConnectParams>,
@@ -234,12 +242,16 @@ impl OpcUaMcpServer {
             topology,
         });
 
-        Ok(CallToolResult::structured(serde_json::to_value(resp).unwrap()))
+        Ok(CallToolResult::structured(
+            serde_json::to_value(resp).unwrap(),
+        ))
     }
 
     // ── disconnect ────────────────────────────────────────────────────────────
 
-    #[tool(description = "Close the OPC-UA session cleanly, sending a CloseSession request to the server.")]
+    #[tool(
+        description = "Close the OPC-UA session cleanly, sending a CloseSession request to the server."
+    )]
     async fn disconnect(
         &self,
         Parameters(_p): Parameters<DisconnectParams>,
@@ -260,7 +272,9 @@ impl OpcUaMcpServer {
 
     // ── discover_tags ─────────────────────────────────────────────────────────
 
-    #[tool(description = "Return tag descriptors from topology.yaml. Returns an empty list if no topology is loaded — run browse or get_node_tree to explore the address space.")]
+    #[tool(
+        description = "Return tag descriptors from topology.yaml. Returns an empty list if no topology is loaded — run browse or get_node_tree to explore the address space."
+    )]
     async fn discover_tags(
         &self,
         Parameters(p): Parameters<DiscoverTagsParams>,
@@ -275,12 +289,8 @@ impl OpcUaMcpServer {
             .tags
             .iter()
             .filter(|t| {
-                p.process_area
-                    .as_ref()
-                    .map_or(true, |f| &t.process_area == f)
-                    && p.equipment_id
-                        .as_ref()
-                        .map_or(true, |f| &t.equipment_id == f)
+                p.process_area.as_ref().is_none_or(|f| &t.process_area == f)
+                    && p.equipment_id.as_ref().is_none_or(|f| &t.equipment_id == f)
             })
             .map(topology_tag_to_descriptor)
             .collect();
@@ -292,7 +302,9 @@ impl OpcUaMcpServer {
 
     // ── browse ────────────────────────────────────────────────────────────────
 
-    #[tool(description = "Browse the OPC-UA address space from a starting node. Returns child nodes with their NodeId, browse name, display name, and node class. Use discover_tags for tag metadata.")]
+    #[tool(
+        description = "Browse the OPC-UA address space from a starting node. Returns child nodes with their NodeId, browse name, display name, and node class. Use discover_tags for tag metadata."
+    )]
     async fn browse(
         &self,
         Parameters(p): Parameters<BrowseParams>,
@@ -338,7 +350,9 @@ impl OpcUaMcpServer {
 
     // ── get_node_tree ─────────────────────────────────────────────────────────
 
-    #[tool(description = "Return a nested view of the OPC-UA address space. Intentionally slow — use only for topology onboarding. Hard cap: 1000 nodes. Use browse for incremental exploration.")]
+    #[tool(
+        description = "Return a nested view of the OPC-UA address space. Intentionally slow — use only for topology onboarding. Hard cap: 1000 nodes. Use browse for incremental exploration."
+    )]
     async fn get_node_tree(
         &self,
         Parameters(p): Parameters<GetNodeTreeParams>,
@@ -374,7 +388,9 @@ impl OpcUaMcpServer {
 
     // ── read_tag ──────────────────────────────────────────────────────────────
 
-    #[tool(description = "Read the current value of an OPC-UA Variable node by NodeId. Returns a VQT envelope with status code mapped to quality (Good/Uncertain/Bad).")]
+    #[tool(
+        description = "Read the current value of an OPC-UA Variable node by NodeId. Returns a VQT envelope with status code mapped to quality (Good/Uncertain/Bad)."
+    )]
     async fn read_tag(
         &self,
         Parameters(p): Parameters<ReadTagParams>,
@@ -402,7 +418,11 @@ impl OpcUaMcpServer {
         };
 
         let mut dvs = match session
-            .read(&[make_read_value_id(node_id)], TimestampsToReturn::Both, 0.0)
+            .read(
+                &[make_read_value_id(node_id)],
+                TimestampsToReturn::Both,
+                0.0,
+            )
             .await
         {
             Ok(v) => v,
@@ -423,7 +443,9 @@ impl OpcUaMcpServer {
 
     // ── read_tag_history ──────────────────────────────────────────────────────
 
-    #[tool(description = "Read historical values for an OPC-UA node that exposes HistoricalAccess. Returns HISTORY_UNAVAILABLE if the server does not support history for this node.")]
+    #[tool(
+        description = "Read historical values for an OPC-UA node that exposes HistoricalAccess. Returns HISTORY_UNAVAILABLE if the server does not support history for this node."
+    )]
     async fn read_tag_history(
         &self,
         Parameters(p): Parameters<ReadTagHistoryParams>,
@@ -528,7 +550,9 @@ impl OpcUaMcpServer {
 
     // ── write_tag ─────────────────────────────────────────────────────────────
 
-    #[tool(description = "Write a value to an OPC-UA Variable node. Gated by topology write_permissions. Requires operator_id and reason for audit trail.")]
+    #[tool(
+        description = "Write a value to an OPC-UA Variable node. Gated by topology write_permissions. Requires operator_id and reason for audit trail."
+    )]
     async fn write_tag(
         &self,
         Parameters(p): Parameters<WriteTagParams>,
@@ -550,9 +574,9 @@ impl OpcUaMcpServer {
                 return Ok(fw_error(AdapterError {
                     code: ErrorCode::TagNotWritable,
                     message: format!(
-                        "'{}' is not in write_permissions — add it to topology.yaml to enable writes",
-                        p.tag_id
-                    ),
+                    "'{}' is not in write_permissions — add it to topology.yaml to enable writes",
+                    p.tag_id
+                ),
                     tag_id: Some(p.tag_id),
                 }))
             }
@@ -625,7 +649,9 @@ impl OpcUaMcpServer {
 
     // ── get_server_info ───────────────────────────────────────────────────────
 
-    #[tool(description = "Return OPC-UA server metadata, connection state, and supported capabilities.")]
+    #[tool(
+        description = "Return OPC-UA server metadata, connection state, and supported capabilities."
+    )]
     async fn get_server_info(&self) -> Result<CallToolResult, McpError> {
         let guard = self.inner.lock().await;
         let (connected, conn_state, server_name, protocol_version, uptime, last_error) =

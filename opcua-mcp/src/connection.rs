@@ -63,20 +63,17 @@ pub struct TopologyConfig {
 pub fn load_topology() -> TopologyConfig {
     let candidates = ["topology.yaml", "topology.yml", "../topology.yaml"];
     for path in &candidates {
-        match std::fs::read_to_string(path) {
-            Ok(content) => match serde_yaml::from_str::<TopologyConfig>(&content) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            match serde_yaml::from_str::<TopologyConfig>(&content) {
                 Ok(config) => {
                     tracing::info!("loaded topology from {path}");
                     return config;
                 }
                 Err(e) => tracing::warn!("failed to parse {path}: {e}"),
-            },
-            Err(_) => {}
+            }
         }
     }
-    tracing::warn!(
-        "no topology.yaml found — discover_tags returns empty list; all writes denied"
-    );
+    tracing::warn!("no topology.yaml found — discover_tags returns empty list; all writes denied");
     TopologyConfig::default()
 }
 
@@ -118,8 +115,13 @@ pub async fn establish_session(
             tag_id: None,
         })?;
 
-    let endpoint: EndpointDescription =
-        (endpoint_url, security_policy, security_mode, UserTokenPolicy::anonymous()).into();
+    let endpoint: EndpointDescription = (
+        endpoint_url,
+        security_policy,
+        security_mode,
+        UserTokenPolicy::anonymous(),
+    )
+        .into();
 
     let (session, event_loop) = client
         .connect_to_matching_endpoint(endpoint, identity)
@@ -379,10 +381,10 @@ pub fn topology_tag_to_descriptor(t: &TopologyTag) -> TagDescriptor {
         writable: t.writable,
         process_area: t.process_area.clone(),
         equipment_id: t.equipment_id.clone(),
-        normal_range: t
-            .normal_range
-            .as_ref()
-            .map(|r| NormalRange { min: r.min, max: r.max }),
+        normal_range: t.normal_range.as_ref().map(|r| NormalRange {
+            min: r.min,
+            max: r.max,
+        }),
     }
 }
 
@@ -467,9 +469,7 @@ pub fn validate_write(
         if !expected_units.is_empty() && units != expected_units.as_str() {
             return Err(AdapterError {
                 code: ErrorCode::InvalidValue,
-                message: format!(
-                    "units mismatch: expected '{expected_units}', got '{units}'"
-                ),
+                message: format!("units mismatch: expected '{expected_units}', got '{units}'"),
                 tag_id: Some(tag_id.to_string()),
             });
         }
@@ -591,8 +591,14 @@ mod tests {
 
     #[test]
     fn variant_bool_to_bool() {
-        assert!(matches!(variant_to_tag_value(&Variant::Boolean(true)), TagValue::Bool(true)));
-        assert!(matches!(variant_to_tag_value(&Variant::Boolean(false)), TagValue::Bool(false)));
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Boolean(true)),
+            TagValue::Bool(true)
+        ));
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Boolean(false)),
+            TagValue::Bool(false)
+        ));
     }
 
     #[test]
@@ -610,17 +616,26 @@ mod tests {
 
     #[test]
     fn quality_good_status() {
-        assert_eq!(status_code_to_quality(Some(StatusCode::Good)), Quality::Good);
+        assert_eq!(
+            status_code_to_quality(Some(StatusCode::Good)),
+            Quality::Good
+        );
     }
 
     #[test]
     fn quality_uncertain_status() {
-        assert_eq!(status_code_to_quality(Some(StatusCode::UncertainSubNormal)), Quality::Uncertain);
+        assert_eq!(
+            status_code_to_quality(Some(StatusCode::UncertainSubNormal)),
+            Quality::Uncertain
+        );
     }
 
     #[test]
     fn quality_bad_status() {
-        assert_eq!(status_code_to_quality(Some(StatusCode::BadNodeIdInvalid)), Quality::Bad);
+        assert_eq!(
+            status_code_to_quality(Some(StatusCode::BadNodeIdInvalid)),
+            Quality::Bad
+        );
     }
 
     // ── data_value_to_vqt ────────────────────────────────────────────────────
