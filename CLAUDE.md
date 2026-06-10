@@ -130,3 +130,16 @@ Pattern from existing stubs (`modbus-mcp`, `dnp3-mcp`, etc.):
 - **Write audit log is mandatory**: `write_audit.jsonl` append on every successful write is part of conformance, not optional.
 - **No waterworks imports**: this crate is plant-agnostic. Any waterworks-specific behavior lives in waterworks-ai, not here.
 - **Stubs must compile**: implement `FieldworksAdapter` returning stubs rather than leaving `todo!()` panics that break the workspace build.
+
+## Architecture notes — reviewed and accepted
+
+**`FieldworksAdapter` trait is a specification document, not compiler enforcement.** The trait in `fieldworks-adapter-core` defines the nine-tool surface but no adapter `impl`s it. The rmcp macro system (`#[tool_router]`, `#[tool]`) generates tool dispatch through its own machinery and doesn't compose with a hand-written trait impl at the same level. Conformance is enforced by convention and code review. Don't add `impl FieldworksAdapter for MqttServer` blocks — they'd be dead code.
+
+**`thiserror` is absent by design.** `AdapterError` is a hand-rolled struct. Adding `thiserror` would only replace boilerplate with different boilerplate — nothing propagates errors with `?` from external crates into `AdapterError`, so the derive benefit doesn't apply here.
+
+**`unwrap()` calls in production code are all provably infallible.** Three patterns exist:
+- `serde_json::to_value(&T).unwrap()` — on our own `Serialize` types; cannot fail
+- `Mutex::lock().unwrap()` / `RwLock::write().unwrap()` — standard Rust practice; poisoning only occurs on thread panic
+- `guard.as_ref().unwrap()` after an explicit `is_none()` early return — proven `Some` by control flow
+
+Don't flag these as bugs or suggest replacing them with `expect()` or `?` propagation.
