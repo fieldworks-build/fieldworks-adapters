@@ -225,3 +225,111 @@ pub trait FieldworksAdapter {
 
     async fn get_server_info(&self) -> AdapterResult<ServerInfoResponse>;
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Quality serialization ─────────────────────────────────────────────────
+
+    #[test]
+    fn quality_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&Quality::Good).unwrap(), "\"good\"");
+        assert_eq!(serde_json::to_string(&Quality::Uncertain).unwrap(), "\"uncertain\"");
+        assert_eq!(serde_json::to_string(&Quality::Bad).unwrap(), "\"bad\"");
+    }
+
+    #[test]
+    fn quality_roundtrips() {
+        for q in [Quality::Good, Quality::Uncertain, Quality::Bad] {
+            let s = serde_json::to_string(&q).unwrap();
+            let back: Quality = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, q);
+        }
+    }
+
+    // ── TagValue serialization ────────────────────────────────────────────────
+
+    #[test]
+    fn tag_value_float_is_bare_number() {
+        let v = TagValue::Float(42.5);
+        assert_eq!(serde_json::to_string(&v).unwrap(), "42.5");
+    }
+
+    #[test]
+    fn tag_value_bool_is_bare_bool() {
+        assert_eq!(serde_json::to_string(&TagValue::Bool(true)).unwrap(), "true");
+        assert_eq!(serde_json::to_string(&TagValue::Bool(false)).unwrap(), "false");
+    }
+
+    #[test]
+    fn tag_value_text_is_bare_string() {
+        let v = TagValue::Text("hello".into());
+        assert_eq!(serde_json::to_string(&v).unwrap(), "\"hello\"");
+    }
+
+    // ── ErrorCode serialization ───────────────────────────────────────────────
+
+    #[test]
+    fn error_codes_serialize_screaming_snake_case() {
+        let cases = [
+            (ErrorCode::TagNotFound, "\"TAG_NOT_FOUND\""),
+            (ErrorCode::TagNotWritable, "\"TAG_NOT_WRITABLE\""),
+            (ErrorCode::ConnectionError, "\"CONNECTION_ERROR\""),
+            (ErrorCode::Timeout, "\"TIMEOUT\""),
+            (ErrorCode::InvalidValue, "\"INVALID_VALUE\""),
+            (ErrorCode::PermissionDenied, "\"PERMISSION_DENIED\""),
+            (ErrorCode::HistoryUnavailable, "\"HISTORY_UNAVAILABLE\""),
+        ];
+        for (code, expected) in cases {
+            assert_eq!(serde_json::to_string(&code).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn error_code_roundtrips() {
+        for code in [
+            ErrorCode::TagNotFound,
+            ErrorCode::TagNotWritable,
+            ErrorCode::ConnectionError,
+            ErrorCode::Timeout,
+            ErrorCode::InvalidValue,
+            ErrorCode::PermissionDenied,
+            ErrorCode::HistoryUnavailable,
+        ] {
+            let s = serde_json::to_string(&code).unwrap();
+            let back: ErrorCode = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, code);
+        }
+    }
+
+    // ── Vqt serialization ─────────────────────────────────────────────────────
+
+    #[test]
+    fn vqt_serializes_to_expected_shape() {
+        let vqt = Vqt {
+            tag_id: "factory/pump01/flow".into(),
+            value: TagValue::Float(312.7),
+            quality: Quality::Good,
+            timestamp: "2026-06-10T00:00:00.000Z".into(),
+            units: "m3/h".into(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&vqt).unwrap();
+        assert_eq!(v["tag_id"], "factory/pump01/flow");
+        assert_eq!(v["value"], 312.7);
+        assert_eq!(v["quality"], "good");
+        assert_eq!(v["units"], "m3/h");
+    }
+
+    #[test]
+    fn write_value_float_is_bare_number() {
+        assert_eq!(serde_json::to_string(&WriteValue::Float(1.5)).unwrap(), "1.5");
+    }
+
+    #[test]
+    fn write_value_bool_is_bare_bool() {
+        assert_eq!(serde_json::to_string(&WriteValue::Bool(true)).unwrap(), "true");
+    }
+}

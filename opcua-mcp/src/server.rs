@@ -4,11 +4,11 @@ use crate::connection::{
     browse_flat, browse_tree, data_value_to_vqt, establish_session, extract_history_data,
     load_topology, log_write_audit, make_history_read_details, make_history_value_id,
     make_opc_write_value, make_read_value_id, now_iso, parse_node_id, topology_tag_to_descriptor,
-    OpcUaConnection,
+    validate_write, OpcUaConnection,
 };
 use async_opcua::{
     client::IdentityToken,
-    types::{DateTime, MessageSecurityMode, NodeId, StatusCode, TimestampsToReturn, Variant},
+    types::{DateTime, MessageSecurityMode, NodeId, StatusCode, TimestampsToReturn},
 };
 use chrono::{SecondsFormat, Utc};
 use fieldworks_adapter_core::*;
@@ -558,58 +558,9 @@ impl OpcUaMcpServer {
             }
         };
 
-        let (variant, write_value) = match &p.value {
-            serde_json::Value::Number(n) => {
-                let f = match n.as_f64() {
-                    Some(f) => f,
-                    None => {
-                        return Ok(fw_error(AdapterError {
-                            code: ErrorCode::InvalidValue,
-                            message: "value is not a valid number".into(),
-                            tag_id: Some(p.tag_id),
-                        }))
-                    }
-                };
-                if let Some(min) = perm.min {
-                    if f < min {
-                        return Ok(fw_error(AdapterError {
-                            code: ErrorCode::InvalidValue,
-                            message: format!("value {f} is below minimum {min}"),
-                            tag_id: Some(p.tag_id),
-                        }));
-                    }
-                }
-                if let Some(max) = perm.max {
-                    if f > max {
-                        return Ok(fw_error(AdapterError {
-                            code: ErrorCode::InvalidValue,
-                            message: format!("value {f} exceeds maximum {max}"),
-                            tag_id: Some(p.tag_id),
-                        }));
-                    }
-                }
-                if let Some(ref expected_units) = perm.units {
-                    if !expected_units.is_empty() && p.units != *expected_units {
-                        return Ok(fw_error(AdapterError {
-                            code: ErrorCode::InvalidValue,
-                            message: format!(
-                                "units mismatch: expected '{expected_units}', got '{}'",
-                                p.units
-                            ),
-                            tag_id: Some(p.tag_id),
-                        }));
-                    }
-                }
-                (Variant::Double(f), WriteValue::Float(f))
-            }
-            serde_json::Value::Bool(b) => (Variant::Boolean(*b), WriteValue::Bool(*b)),
-            _ => {
-                return Ok(fw_error(AdapterError {
-                    code: ErrorCode::InvalidValue,
-                    message: "value must be a number or boolean — strings are not writable".into(),
-                    tag_id: Some(p.tag_id),
-                }))
-            }
+        let (variant, write_value) = match validate_write(&perm, &p.value, &p.units, &p.tag_id) {
+            Ok(pair) => pair,
+            Err(e) => return Ok(fw_error(e)),
         };
 
         let node_id = match parse_node_id(&p.tag_id) {

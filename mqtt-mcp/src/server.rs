@@ -2,7 +2,7 @@
 
 use crate::connection::{
     self, build_topic_tree, load_topology, log_write_audit, parse_mqtt_payload,
-    topology_tag_to_descriptor, vqt_to_descriptor, ConnStatus, MqttConnection,
+    topology_tag_to_descriptor, validate_write, vqt_to_descriptor, ConnStatus, MqttConnection,
 };
 use chrono::{SecondsFormat, Utc};
 use fieldworks_adapter_core::*;
@@ -632,7 +632,6 @@ impl MqttMcpServer {
             }
         };
 
-        // Enforce write permissions.
         let perm = match topology_perm {
             None => {
                 return Ok(fw_error(AdapterError {
@@ -647,54 +646,10 @@ impl MqttMcpServer {
             Some(p) => p,
         };
 
-        // Validate value type: must be number or boolean per spec.
-        let write_value = if let Some(f) = value.as_f64() {
-            // Range check against topology limits.
-            if let Some(min) = perm.min {
-                if f < min {
-                    return Ok(fw_error(AdapterError {
-                        code: ErrorCode::InvalidValue,
-                        message: format!(
-                            "Value {f} is below the configured minimum {min} for '{tag_id}'."
-                        ),
-                        tag_id: Some(tag_id),
-                    }));
-                }
-            }
-            if let Some(max) = perm.max {
-                if f > max {
-                    return Ok(fw_error(AdapterError {
-                        code: ErrorCode::InvalidValue,
-                        message: format!(
-                            "Value {f} exceeds the configured maximum {max} for '{tag_id}'."
-                        ),
-                        tag_id: Some(tag_id),
-                    }));
-                }
-            }
-            WriteValue::Float(f)
-        } else if let Some(b) = value.as_bool() {
-            WriteValue::Bool(b)
-        } else {
-            return Ok(fw_error(AdapterError {
-                code: ErrorCode::InvalidValue,
-                message: "write_tag value must be a number or boolean. String values are not writable.".into(),
-                tag_id: Some(tag_id),
-            }));
+        let write_value = match validate_write(&perm, &value, &units, &tag_id) {
+            Ok(v) => v,
+            Err(e) => return Ok(fw_error(e)),
         };
-
-        // Units check.
-        if let Some(ref configured_units) = perm.units {
-            if !configured_units.is_empty() && configured_units != &units {
-                return Ok(fw_error(AdapterError {
-                    code: ErrorCode::InvalidValue,
-                    message: format!(
-                        "Units mismatch for '{tag_id}': expected '{configured_units}', got '{units}'."
-                    ),
-                    tag_id: Some(tag_id),
-                }));
-            }
-        }
 
         let timestamp = now_iso();
 

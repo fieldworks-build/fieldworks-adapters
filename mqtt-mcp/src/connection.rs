@@ -360,6 +360,58 @@ fn insert_path(
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
 /// Append a write event to `write_audit.jsonl` (append-only, one JSON object per line).
+/// Pure validation for write_tag. Extracted so it can be unit-tested without a live connection.
+pub fn validate_write(
+    perm: &WritePermission,
+    value: &serde_json::Value,
+    units: &str,
+    tag_id: &str,
+) -> Result<WriteValue, AdapterError> {
+    let write_value = if let Some(f) = value.as_f64() {
+        if let Some(min) = perm.min {
+            if f < min {
+                return Err(AdapterError {
+                    code: ErrorCode::InvalidValue,
+                    message: format!("Value {f} is below the configured minimum {min} for '{tag_id}'."),
+                    tag_id: Some(tag_id.to_string()),
+                });
+            }
+        }
+        if let Some(max) = perm.max {
+            if f > max {
+                return Err(AdapterError {
+                    code: ErrorCode::InvalidValue,
+                    message: format!("Value {f} exceeds the configured maximum {max} for '{tag_id}'."),
+                    tag_id: Some(tag_id.to_string()),
+                });
+            }
+        }
+        WriteValue::Float(f)
+    } else if let Some(b) = value.as_bool() {
+        WriteValue::Bool(b)
+    } else {
+        return Err(AdapterError {
+            code: ErrorCode::InvalidValue,
+            message: "write_tag value must be a number or boolean. String values are not writable.".into(),
+            tag_id: Some(tag_id.to_string()),
+        });
+    };
+
+    if let Some(ref configured_units) = perm.units {
+        if !configured_units.is_empty() && configured_units != units {
+            return Err(AdapterError {
+                code: ErrorCode::InvalidValue,
+                message: format!(
+                    "Units mismatch for '{tag_id}': expected '{configured_units}', got '{units}'."
+                ),
+                tag_id: Some(tag_id.to_string()),
+            });
+        }
+    }
+
+    Ok(write_value)
+}
+
 pub fn log_write_audit(
     tag_id: &str,
     value: &serde_json::Value,
@@ -386,6 +438,223 @@ pub fn log_write_audit(
             let _ = writeln!(f, "{entry}");
         }
         Err(e) => tracing::error!("failed to write audit log: {e}"),
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ts() -> &'static str {
+        "2026-06-10T00:00:00.000Z"
+    }
+
+    // ── parse_mqtt_payload ────────────────────────────────────────────────────
+
+    #[test]
+    fn payload_json_value_key_float() {
+        let vqt = parse_mqtt_payload("t", r#"{"value": 42.3}"#, ts());
+        assert!(matches!(vqt.value, TagValue::Float(f) if (f - 42.3).abs() < 1e-9));
+        assert_eq!(vqt.quality, Quality::Good);
+    }
+
+    #[test]
+    fn payload_json_value_key_bool() {
+        let vqt = parse_mqtt_payload("t", r#"{"value": true}"#, ts());
+        assert!(matches!(vqt.value, TagValue::Bool(true)));
+    }
+
+    #[test]
+    fn payload_json_quality_propagates() {
+        let vqt = parse_mqtt_payload("t", r#"{"value": 1.0, "quality": "bad"}"#, ts());
+        assert_eq!(vqt.quality, Quality::Bad);
+    }
+
+    #[test]
+    fn payload_json_units_propagates() {
+        let vqt = parse_mqtt_payload("t", r#"{"value": 1.0, "units": "bar"}"#, ts());
+        assert_eq!(vqt.units, "bar");
+    }
+
+    #[test]
+    fn payload_raw_float() {
+        let vqt = parse_mqtt_payload("t", "3.14", ts());
+        assert!(matches!(vqt.value, TagValue::Float(f) if (f - 3.14).abs() < 1e-9));
+    }
+
+    #[test]
+    fn payload_raw_integer_string() {
+        let vqt = parse_mqtt_payload("t", "100", ts());
+        assert!(matches!(vqt.value, TagValue::Float(f) if (f - 100.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn payload_bool_aliases_true() {
+        // "1" parses as f64 first, so only word-form aliases reach the bool branch
+        for s in ["true", "True", "TRUE", "on", "ON", "open", "active", "high"] {
+            let vqt = parse_mqtt_payload("t", s, ts());
+            assert!(
+                matches!(vqt.value, TagValue::Bool(true)),
+                "expected Bool(true) for payload '{s}'"
+            );
+        }
+    }
+
+    #[test]
+    fn payload_bool_aliases_false() {
+        // "0" parses as f64 first, so only word-form aliases reach the bool branch
+        for s in ["false", "False", "FALSE", "off", "OFF", "closed", "inactive", "low"] {
+            let vqt = parse_mqtt_payload("t", s, ts());
+            assert!(
+                matches!(vqt.value, TagValue::Bool(false)),
+                "expected Bool(false) for payload '{s}'"
+            );
+        }
+    }
+
+    #[test]
+    fn payload_arbitrary_string_fallback() {
+        let vqt = parse_mqtt_payload("t", "UNKNOWN_STATE", ts());
+        assert!(matches!(vqt.value, TagValue::Text(s) if s == "UNKNOWN_STATE"));
+    }
+
+    #[test]
+    fn payload_topic_id_is_set() {
+        let vqt = parse_mqtt_payload("factory/pump01/flow", "1.0", ts());
+        assert_eq!(vqt.tag_id, "factory/pump01/flow");
+    }
+
+    #[test]
+    fn payload_json_without_value_key_falls_through() {
+        // JSON but no "value" key → try as raw string → falls back to Text
+        let vqt = parse_mqtt_payload("t", r#"{"other": 1}"#, ts());
+        assert!(matches!(vqt.value, TagValue::Text(_)));
+    }
+
+    // ── str_to_quality ────────────────────────────────────────────────────────
+
+    #[test]
+    fn quality_strings() {
+        assert_eq!(str_to_quality("good"), Quality::Good);
+        assert_eq!(str_to_quality("uncertain"), Quality::Uncertain);
+        assert_eq!(str_to_quality("bad"), Quality::Bad);
+        assert_eq!(str_to_quality("unknown"), Quality::Bad);
+        assert_eq!(str_to_quality(""), Quality::Bad);
+    }
+
+    // ── build_topic_tree ──────────────────────────────────────────────────────
+
+    #[test]
+    fn topic_tree_flat_single_level() {
+        let tree = build_topic_tree([("sensor".into(), serde_json::json!(1))]);
+        assert_eq!(tree["sensor"], 1);
+    }
+
+    #[test]
+    fn topic_tree_nested() {
+        let tree = build_topic_tree([
+            ("factory/pump01/flow".into(), serde_json::json!(42.0)),
+            ("factory/pump01/speed".into(), serde_json::json!(30.0)),
+            ("factory/pump02/flow".into(), serde_json::json!(10.0)),
+        ]);
+        assert_eq!(tree["factory"]["pump01"]["flow"], 42.0);
+        assert_eq!(tree["factory"]["pump01"]["speed"], 30.0);
+        assert_eq!(tree["factory"]["pump02"]["flow"], 10.0);
+    }
+
+    #[test]
+    fn topic_tree_empty_input() {
+        let tree = build_topic_tree(std::iter::empty::<(String, serde_json::Value)>());
+        assert!(tree.as_object().unwrap().is_empty());
+    }
+
+    // ── validate_write ────────────────────────────────────────────────────────
+
+    fn perm(min: Option<f64>, max: Option<f64>, units: Option<&str>) -> WritePermission {
+        WritePermission {
+            min,
+            max,
+            units: units.map(String::from),
+        }
+    }
+
+    #[test]
+    fn validate_write_float_ok() {
+        let p = perm(Some(0.0), Some(100.0), Some("Hz"));
+        let result = validate_write(&p, &serde_json::json!(50.0), "Hz", "tag");
+        assert!(matches!(result, Ok(WriteValue::Float(f)) if (f - 50.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn validate_write_bool_ok() {
+        let p = perm(None, None, None);
+        let result = validate_write(&p, &serde_json::json!(true), "", "tag");
+        assert!(matches!(result, Ok(WriteValue::Bool(true))));
+    }
+
+    #[test]
+    fn validate_write_below_min() {
+        let p = perm(Some(10.0), Some(100.0), None);
+        let err = validate_write(&p, &serde_json::json!(5.0), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("minimum"));
+    }
+
+    #[test]
+    fn validate_write_above_max() {
+        let p = perm(Some(0.0), Some(60.0), None);
+        let err = validate_write(&p, &serde_json::json!(61.0), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("maximum"));
+    }
+
+    #[test]
+    fn validate_write_at_boundary_passes() {
+        let p = perm(Some(0.0), Some(60.0), Some("Hz"));
+        assert!(validate_write(&p, &serde_json::json!(0.0), "Hz", "tag").is_ok());
+        assert!(validate_write(&p, &serde_json::json!(60.0), "Hz", "tag").is_ok());
+    }
+
+    #[test]
+    fn validate_write_units_mismatch() {
+        let p = perm(None, None, Some("Hz"));
+        let err = validate_write(&p, &serde_json::json!(50.0), "rpm", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("Units") || err.message.contains("units"));
+    }
+
+    #[test]
+    fn validate_write_empty_units_skips_check() {
+        let p = perm(None, None, Some(""));
+        assert!(validate_write(&p, &serde_json::json!(1.0), "anything", "tag").is_ok());
+    }
+
+    #[test]
+    fn validate_write_string_rejected() {
+        let p = perm(None, None, None);
+        let err = validate_write(&p, &serde_json::json!("bad"), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+    }
+
+    #[test]
+    fn validate_write_tag_id_in_error() {
+        let p = perm(Some(0.0), Some(10.0), None);
+        let err = validate_write(&p, &serde_json::json!(99.0), "", "my/tag").unwrap_err();
+        assert_eq!(err.tag_id.as_deref(), Some("my/tag"));
+    }
+
+    // ── load_topology (fixture) ───────────────────────────────────────────────
+
+    #[test]
+    fn load_topology_returns_default_when_no_file() {
+        // No topology.yaml in the test working directory → default (empty).
+        // This test is intentionally loose: it just verifies the function
+        // doesn't panic and returns a valid (possibly empty) config.
+        let config = load_topology();
+        // If a topology.yaml happens to exist, we just check it parsed.
+        let _ = config.tags.len();
     }
 }
 

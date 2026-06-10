@@ -419,6 +419,65 @@ pub fn extract_history_data(obj: async_opcua::types::ExtensionObject) -> Vec<Dat
 
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
+/// Pure validation for write_tag. Extracted so it can be unit-tested without a live connection.
+pub fn validate_write(
+    perm: &WritePermission,
+    value: &serde_json::Value,
+    units: &str,
+    tag_id: &str,
+) -> Result<(Variant, WriteValue), AdapterError> {
+    let (variant, write_value) = match value {
+        serde_json::Value::Number(n) => {
+            let f = n.as_f64().ok_or_else(|| AdapterError {
+                code: ErrorCode::InvalidValue,
+                message: "value is not a valid number".into(),
+                tag_id: Some(tag_id.to_string()),
+            })?;
+            if let Some(min) = perm.min {
+                if f < min {
+                    return Err(AdapterError {
+                        code: ErrorCode::InvalidValue,
+                        message: format!("value {f} is below minimum {min}"),
+                        tag_id: Some(tag_id.to_string()),
+                    });
+                }
+            }
+            if let Some(max) = perm.max {
+                if f > max {
+                    return Err(AdapterError {
+                        code: ErrorCode::InvalidValue,
+                        message: format!("value {f} exceeds maximum {max}"),
+                        tag_id: Some(tag_id.to_string()),
+                    });
+                }
+            }
+            (Variant::Double(f), WriteValue::Float(f))
+        }
+        serde_json::Value::Bool(b) => (Variant::Boolean(*b), WriteValue::Bool(*b)),
+        _ => {
+            return Err(AdapterError {
+                code: ErrorCode::InvalidValue,
+                message: "value must be a number or boolean — strings are not writable".into(),
+                tag_id: Some(tag_id.to_string()),
+            })
+        }
+    };
+
+    if let Some(ref expected_units) = perm.units {
+        if !expected_units.is_empty() && units != expected_units.as_str() {
+            return Err(AdapterError {
+                code: ErrorCode::InvalidValue,
+                message: format!(
+                    "units mismatch: expected '{expected_units}', got '{units}'"
+                ),
+                tag_id: Some(tag_id.to_string()),
+            });
+        }
+    }
+
+    Ok((variant, write_value))
+}
+
 pub fn log_write_audit(
     tag_id: &str,
     value: &serde_json::Value,
@@ -452,4 +511,217 @@ pub fn log_write_audit(
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_opcua::types::UAString;
+
+    fn perm(min: Option<f64>, max: Option<f64>, units: Option<&str>) -> WritePermission {
+        WritePermission {
+            min,
+            max,
+            units: units.map(String::from),
+        }
+    }
+
+    // ── parse_node_id ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_node_id_string_form() {
+        assert!(parse_node_id("ns=2;s=Pump01.FlowRate").is_ok());
+    }
+
+    #[test]
+    fn parse_node_id_numeric_form() {
+        assert!(parse_node_id("ns=0;i=85").is_ok());
+    }
+
+    #[test]
+    fn parse_node_id_invalid_returns_tag_not_found() {
+        let err = parse_node_id("not-a-valid-nodeid").unwrap_err();
+        assert_eq!(err.code, ErrorCode::TagNotFound);
+        assert_eq!(err.tag_id.as_deref(), Some("not-a-valid-nodeid"));
+    }
+
+    // ── variant_to_tag_value ──────────────────────────────────────────────────
+
+    #[test]
+    fn variant_double_to_float() {
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Double(42.5)),
+            TagValue::Float(f) if (f - 42.5).abs() < 1e-9
+        ));
+    }
+
+    #[test]
+    fn variant_float_to_float() {
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Float(3.14)),
+            TagValue::Float(f) if (f - 3.14_f32 as f64).abs() < 1e-5
+        ));
+    }
+
+    #[test]
+    fn variant_int32_to_float() {
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Int32(100)),
+            TagValue::Float(f) if (f - 100.0).abs() < 1e-9
+        ));
+    }
+
+    #[test]
+    fn variant_uint32_to_float() {
+        assert!(matches!(
+            variant_to_tag_value(&Variant::UInt32(7)),
+            TagValue::Float(f) if (f - 7.0).abs() < 1e-9
+        ));
+    }
+
+    #[test]
+    fn variant_int64_to_float() {
+        assert!(matches!(
+            variant_to_tag_value(&Variant::Int64(999)),
+            TagValue::Float(f) if (f - 999.0).abs() < 1e-9
+        ));
+    }
+
+    #[test]
+    fn variant_bool_to_bool() {
+        assert!(matches!(variant_to_tag_value(&Variant::Boolean(true)), TagValue::Bool(true)));
+        assert!(matches!(variant_to_tag_value(&Variant::Boolean(false)), TagValue::Bool(false)));
+    }
+
+    #[test]
+    fn variant_string_to_text() {
+        let v = Variant::String(UAString::from("hello"));
+        assert!(matches!(variant_to_tag_value(&v), TagValue::Text(s) if s == "hello"));
+    }
+
+    // ── status_code_to_quality ────────────────────────────────────────────────
+
+    #[test]
+    fn quality_none_is_good() {
+        assert_eq!(status_code_to_quality(None), Quality::Good);
+    }
+
+    #[test]
+    fn quality_good_status() {
+        assert_eq!(status_code_to_quality(Some(StatusCode::Good)), Quality::Good);
+    }
+
+    #[test]
+    fn quality_uncertain_status() {
+        assert_eq!(status_code_to_quality(Some(StatusCode::UncertainSubNormal)), Quality::Uncertain);
+    }
+
+    #[test]
+    fn quality_bad_status() {
+        assert_eq!(status_code_to_quality(Some(StatusCode::BadNodeIdInvalid)), Quality::Bad);
+    }
+
+    // ── data_value_to_vqt ────────────────────────────────────────────────────
+
+    #[test]
+    fn dv_to_vqt_basic_shape() {
+        let dv = DataValue::new_now(Variant::Double(312.7));
+        let vqt = data_value_to_vqt("ns=2;s=Pump01.Flow", &dv, "m3/h");
+        assert_eq!(vqt.tag_id, "ns=2;s=Pump01.Flow");
+        assert_eq!(vqt.units, "m3/h");
+        assert_eq!(vqt.quality, Quality::Good);
+        assert!(matches!(vqt.value, TagValue::Float(f) if (f - 312.7).abs() < 1e-9));
+    }
+
+    #[test]
+    fn dv_to_vqt_null_value_falls_back() {
+        let dv = DataValue {
+            value: None,
+            status: None,
+            source_timestamp: None,
+            source_picoseconds: None,
+            server_timestamp: None,
+            server_picoseconds: None,
+        };
+        let vqt = data_value_to_vqt("ns=2;s=X", &dv, "");
+        assert!(matches!(&vqt.value, TagValue::Text(s) if s == "null"));
+    }
+
+    #[test]
+    fn dv_to_vqt_bad_status_propagates() {
+        let dv = DataValue::new_now_status(Variant::Double(0.0), StatusCode::BadNodeIdInvalid);
+        let vqt = data_value_to_vqt("ns=2;s=X", &dv, "");
+        assert_eq!(vqt.quality, Quality::Bad);
+    }
+
+    // ── validate_write ────────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_write_float_ok() {
+        let p = perm(Some(0.0), Some(100.0), Some("Hz"));
+        let (variant, wv) = validate_write(&p, &serde_json::json!(50.0), "Hz", "tag").unwrap();
+        assert!(matches!(variant, Variant::Double(f) if (f - 50.0).abs() < 1e-9));
+        assert!(matches!(wv, WriteValue::Float(f) if (f - 50.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn validate_write_bool_ok() {
+        let p = perm(None, None, None);
+        let (variant, wv) = validate_write(&p, &serde_json::json!(true), "", "tag").unwrap();
+        assert!(matches!(variant, Variant::Boolean(true)));
+        assert!(matches!(wv, WriteValue::Bool(true)));
+    }
+
+    #[test]
+    fn validate_write_below_min() {
+        let p = perm(Some(10.0), Some(100.0), None);
+        let err = validate_write(&p, &serde_json::json!(5.0), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("minimum"));
+    }
+
+    #[test]
+    fn validate_write_above_max() {
+        let p = perm(Some(0.0), Some(60.0), None);
+        let err = validate_write(&p, &serde_json::json!(61.0), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("maximum"));
+    }
+
+    #[test]
+    fn validate_write_at_boundary_passes() {
+        let p = perm(Some(0.0), Some(100.0), Some("Hz"));
+        assert!(validate_write(&p, &serde_json::json!(0.0), "Hz", "tag").is_ok());
+        assert!(validate_write(&p, &serde_json::json!(100.0), "Hz", "tag").is_ok());
+    }
+
+    #[test]
+    fn validate_write_units_mismatch() {
+        let p = perm(None, None, Some("Hz"));
+        let err = validate_write(&p, &serde_json::json!(50.0), "rpm", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+        assert!(err.message.contains("units") || err.message.contains("Units"));
+    }
+
+    #[test]
+    fn validate_write_empty_units_skips_check() {
+        let p = perm(None, None, Some(""));
+        assert!(validate_write(&p, &serde_json::json!(1.0), "anything", "tag").is_ok());
+    }
+
+    #[test]
+    fn validate_write_string_rejected() {
+        let p = perm(None, None, None);
+        let err = validate_write(&p, &serde_json::json!("bad"), "", "tag").unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidValue);
+    }
+
+    #[test]
+    fn validate_write_tag_id_in_error() {
+        let p = perm(Some(0.0), Some(10.0), None);
+        let err = validate_write(&p, &serde_json::json!(99.0), "", "ns=2;s=MyTag").unwrap_err();
+        assert_eq!(err.tag_id.as_deref(), Some("ns=2;s=MyTag"));
+    }
 }
