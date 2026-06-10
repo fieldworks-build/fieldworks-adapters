@@ -177,6 +177,30 @@ Shared library crate. Contains:
 - `ConnectResponse`, `DisconnectResponse`, `ServerInfoResponse` — lifecycle response types
 - `FieldworksAdapter` trait — the nine-tool async interface
 
+## Testing
+
+```bash
+# Run all unit tests (no infrastructure required)
+cargo test --workspace
+```
+
+**61 pure-logic unit tests** run without any broker or server:
+
+| Crate | Tests | What's covered |
+|-------|-------|----------------|
+| `fieldworks-adapter-core` | 10 | Quality/TagValue/ErrorCode/Vqt/WriteValue serialization — snake_case, SCREAMING_SNAKE_CASE, untagged |
+| `mqtt-mcp` | 25 | `parse_mqtt_payload` (JSON paths, bool aliases, raw numeric, string fallback), `str_to_quality`, `build_topic_tree`, `validate_write` (range, units, type checks) |
+| `opcua-mcp` | 26 | `parse_node_id`, `variant_to_tag_value` (all numeric arms, bool, string), `status_code_to_quality`, `data_value_to_vqt`, `validate_write` |
+
+**Integration tests** (connection-dependent) are gated by environment variables. Set `MQTT_TEST_HOST` or `OPCUA_TEST_HOST` to run them against a live broker:
+
+```bash
+MQTT_TEST_HOST=localhost cargo test -p mqtt-mcp
+OPCUA_TEST_HOST=opc.tcp://localhost:4840 cargo test -p opcua-mcp
+```
+
+CI runs the unit-only suite on every push via `.github/workflows/test.yml`.
+
 ## Building
 
 Requires Rust 1.75+ (stable async fn in traits).
