@@ -10,7 +10,7 @@ Each adapter exposes the same nine-tool MCP surface so agents can connect, disco
 fieldworks-adapters/
 ├── fieldworks-adapter-core/   # Shared types, VQT envelope, conformance trait
 ├── mqtt-mcp/                  # MQTT v3.1.1 / v5.0 adapter (complete)
-├── opcua-mcp/                 # OPC-UA adapter (stub)
+├── opcua-mcp/                 # OPC-UA adapter (complete)
 ├── modbus-mcp/                # Modbus TCP adapter (stub)
 ├── dnp3-mcp/                  # DNP3 adapter (stub)
 ├── ethernetip-mcp/            # EtherNet/IP adapter (stub)
@@ -26,10 +26,10 @@ Every conformant adapter exposes these tools. Two slots are protocol-specific (m
 | `connect` | Establish a connection to the server |
 | `disconnect` | Cleanly close the connection |
 | `discover_tags` | Return tagged metadata from topology or scan cache |
-| `scan` † | Protocol-native address-space exploration (MQTT: wildcard subscribe; OPC-UA: `browse`) |
-| `get_topic_tree` † | Full address-space dump for topology onboarding (OPC-UA: `get_node_tree`) |
+| `scan` / `browse` † | Protocol-native address-space exploration (MQTT: wildcard subscribe + timed collect; OPC-UA: `browse` with depth limit) |
+| `get_topic_tree` / `get_node_tree` † | Full address-space dump for topology onboarding (MQTT: 10s wildcard scan; OPC-UA: `get_node_tree` recursive browse) |
 | `read_tag` | Read current value with VQT envelope |
-| `read_tag_history` | Read historian data (returns `HISTORY_UNAVAILABLE` where unsupported) |
+| `read_tag_history` | Read historian data (OPC-UA: HistoricalAccess; MQTT: returns `HISTORY_UNAVAILABLE`) |
 | `write_tag` | Write a setpoint with operator attribution and audit log entry |
 | `get_server_info` | Server metadata, connection state, and capability list |
 
@@ -95,6 +95,78 @@ Every successful `write_tag` call appends a JSON line to `write_audit.jsonl` in 
 {"timestamp":"2026-06-09T17:50:00.000Z","tag_id":"factory/pump01/speed_setpoint","value":45.0,"units":"Hz","operator_id":"ops-team","reason":"demand response adjustment"}
 ```
 
+## opcua-mcp
+
+OPC-UA client adapter using [async-opcua](https://crates.io/crates/async-opcua) 0.18.
+
+**Build and run:**
+
+```bash
+cargo build -p opcua-mcp
+RUST_LOG=info ./target/debug/opcua-mcp
+```
+
+**Connect:**
+
+```json
+{ "host": "opc.tcp://localhost:4840" }
+```
+
+Or with security:
+
+```json
+{
+  "host": "192.168.1.10",
+  "port": 4840,
+  "options": {
+    "security_mode": "SignAndEncrypt",
+    "security_policy": "Basic256Sha256",
+    "username": "operator",
+    "password": "secret"
+  }
+}
+```
+
+**Tag IDs are OPC-UA NodeId strings:**
+
+```
+ns=2;s=Pump01.FlowRate        ← string identifier
+ns=2;i=1001                   ← numeric identifier
+ns=0;i=85                     ← Objects folder (browse start)
+```
+
+Use `browse` or `get_node_tree` to discover NodeIds on an unfamiliar server. Use `discover_tags` if a `topology.yaml` is present.
+
+**Protocol-specific tools:**
+
+| Tool | Description |
+|------|-------------|
+| `browse` | Browse child nodes from a starting NodeId with configurable depth (default 1, max 5) |
+| `get_node_tree` | Recursive nested address space dump from a root NodeId (default depth 3, hard cap 1000 nodes) |
+
+**`read_tag_history`** is fully implemented via OPC-UA HistoricalAccess. Returns `HISTORY_UNAVAILABLE` if the server does not expose history for the requested node.
+
+**Optional topology.yaml** — same schema as mqtt-mcp, with NodeId strings as `tag_id` values:
+
+```yaml
+tags:
+  - tag_id: "ns=2;s=Pump01.FlowRate"
+    name: "Pump 01 Flow Rate"
+    units: "m3/h"
+    data_type: "float"
+    writable: false
+    process_area: "raw_water"
+    equipment_id: "pump_01"
+
+write_permissions:
+  "ns=2;s=Pump01.SpeedSetpoint":
+    min: 0.0
+    max: 60.0
+    units: "Hz"
+```
+
+**Security note:** When using `Sign` or `SignAndEncrypt`, the adapter auto-generates a self-signed certificate in `./pki/`. The server must trust this certificate before the connection will succeed. For `SecurityMode::None`, certificate validation is skipped automatically.
+
 ## fieldworks-adapter-core
 
 Shared library crate. Contains:
@@ -124,7 +196,7 @@ An adapter is conformant when it:
 1. Exposes all nine required tools
 2. Returns VQT envelopes from all data reads
 3. Returns one of the seven `ErrorCode` values on failure (never raw protocol errors)
-4. Returns `HISTORY_UNAVAILABLE` from `read_tag_history` if the protocol has no historian
+4. Returns `HISTORY_UNAVAILABLE` from `read_tag_history` if the protocol or server does not support it
 5. Appends to `write_audit.jsonl` on every successful write
 6. Lists all supported tools in the `capabilities` field of `get_server_info`
 
