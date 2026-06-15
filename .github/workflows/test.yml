@@ -42,4 +42,4 @@ jobs:
       - name: cargo audit
         run: |
           cargo install cargo-audit --quiet
-          cargo audit
+          cargo audit --config audit.toml
