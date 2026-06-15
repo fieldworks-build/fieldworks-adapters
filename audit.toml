@@ -1,16 +1,9 @@
 [advisories]
+# Transitive deps with no available fix — see comments below.
 ignore = [
-    # rsa 0.9.10 — Marvin Attack timing side-channel.
-    # Transitive via async-opcua 0.18. No fixed version of rsa exists upstream.
-    # Revisit when async-opcua releases a version with a patched crypto dep.
-    { id = "RUSTSEC-2023-0071", reason = "transitive via async-opcua, no upstream fix available" },
-
-    # rustls-webpki 0.102.8 — three CRL/name-constraint advisories.
-    # Transitive via rumqttc 0.24 -> rustls 0.22 -> rustls-webpki 0.102.
-    # Fix requires rustls 0.23+ which needs a rumqttc major bump.
-    # Revisit when rumqttc ships a version using rustls 0.23.
-    { id = "RUSTSEC-2026-0104", reason = "transitive via rumqttc 0.24, fix requires rustls 0.23" },
-    { id = "RUSTSEC-2026-0049", reason = "transitive via rumqttc 0.24, fix requires rustls 0.23" },
-    { id = "RUSTSEC-2026-0098", reason = "transitive via rumqttc 0.24, fix requires rustls 0.23" },
-    { id = "RUSTSEC-2026-0099", reason = "transitive via rumqttc 0.24, fix requires rustls 0.23" },
+    "RUSTSEC-2023-0071",  # rsa — Marvin Attack, transitive via async-opcua 0.18, no upstream fix
+    "RUSTSEC-2026-0104",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
+    "RUSTSEC-2026-0049",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
+    "RUSTSEC-2026-0098",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
+    "RUSTSEC-2026-0099",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
 ]
