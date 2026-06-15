@@ -38,3 +38,8 @@ jobs:
         # Those env vars are intentionally absent here, so only pure-logic
         # unit tests run. Set the vars in repo secrets and add a second job
         # to enable integration testing against real brokers.
+
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --quiet
+          cargo audit
