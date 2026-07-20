@@ -295,9 +295,7 @@ impl OpcUaMcpServer {
             .map(topology_tag_to_descriptor)
             .collect();
 
-        Ok(CallToolResult::structured(
-            serde_json::to_value(tags).unwrap(),
-        ))
+        Ok(CallToolResult::structured(json!({ "tags": tags })))
     }
 
     // ── browse ────────────────────────────────────────────────────────────────
@@ -343,9 +341,7 @@ impl OpcUaMcpServer {
             })
             .collect();
 
-        Ok(CallToolResult::structured(
-            serde_json::to_value(result).unwrap(),
-        ))
+        Ok(CallToolResult::structured(json!({ "entries": result })))
     }
 
     // ── get_node_tree ─────────────────────────────────────────────────────────
@@ -543,9 +539,7 @@ impl OpcUaMcpServer {
             }
         }
 
-        Ok(CallToolResult::structured(
-            serde_json::to_value(vqts).unwrap(),
-        ))
+        Ok(CallToolResult::structured(json!({ "values": vqts })))
     }
 
     // ── write_tag ─────────────────────────────────────────────────────────────

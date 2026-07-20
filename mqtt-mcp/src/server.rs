@@ -378,9 +378,7 @@ impl MqttMcpServer {
                     tags.retain(|t| &t.equipment_id == eq);
                 }
 
-                Ok(CallToolResult::structured(
-                    serde_json::to_value(&tags).unwrap_or(json!([])),
-                ))
+                Ok(CallToolResult::structured(json!({ "tags": tags })))
             }
         }
     }
@@ -449,7 +447,7 @@ impl MqttMcpServer {
         let _ = client.unsubscribe(&pattern).await;
 
         let entries: Vec<serde_json::Value> = seen.into_values().collect();
-        Ok(CallToolResult::structured(json!(entries)))
+        Ok(CallToolResult::structured(json!({ "entries": entries })))
     }
 
     // ── get_topic_tree ────────────────────────────────────────────────────────
