@@ -1,0 +1,34 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: Publish crates to crates.io
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # fieldworks-adapter-core must land first — mqtt-mcp/opcua-mcp depend
+      # on it as a real crates.io version (see fieldworks-adapters#3), not a
+      # path dependency, so their own publish step below can't resolve it
+      # until this one is actually live on the index.
+      - name: Publish fieldworks-adapter-core
+        run: cargo publish -p fieldworks-adapter-core
+
+      - name: Wait for crates.io index to pick up fieldworks-adapter-core
+        run: sleep 30
+
+      - name: Publish mqtt-mcp
+        run: cargo publish -p mqtt-mcp
+
+      - name: Publish opcua-mcp
+        run: cargo publish -p opcua-mcp
