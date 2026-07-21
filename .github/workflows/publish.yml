@@ -12,7 +12,7 @@ jobs:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -32,3 +32,38 @@ jobs:
 
       - name: Publish opcua-mcp
         run: cargo publish -p opcua-mcp
+
+  verify:
+    name: Verify published crates work
+    needs: publish
+    runs-on: ubuntu-latest
+    # No checkout — deliberately not testing local source. This installs
+    # the actual artifacts crates.io now serves and runs fieldworks-core's
+    # conformance suite against them, the same "install the real published
+    # thing in a clean environment" check that caught a real packaging bug
+    # in fieldworks-core before its first PyPI release (schema.cypher
+    # wasn't bundled into the wheel — only worked via editable installs).
+
+    steps:
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Install fieldworks-core[adapters]
+        run: pip install fieldworks-core[adapters]
+
+      - name: Wait for crates.io index to settle
+        run: sleep 15
+
+      - name: Install mqtt-mcp and opcua-mcp from crates.io
+        run: |
+          cargo install mqtt-mcp
+          cargo install opcua-mcp
+
+      - name: Run conformance checks against the installed binaries
+        run: |
+          fieldworks test-adapter --command mqtt-mcp
+          fieldworks test-adapter --command opcua-mcp
