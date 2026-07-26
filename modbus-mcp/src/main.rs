@@ -1,4 +1,26 @@
-fn main() {
-    eprintln!("{}: not yet implemented", env!("CARGO_PKG_NAME"));
-    std::process::exit(1);
+use anyhow::Result;
+use rmcp::{transport::stdio, ServiceExt};
+use tracing_subscriber::EnvFilter;
+
+mod connection;
+mod server;
+use server::ModbusMcpServer;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
+
+    tracing::info!("starting modbus-mcp");
+
+    let service = ModbusMcpServer::new()
+        .serve(stdio())
+        .await
+        .inspect_err(|e| tracing::error!("serve error: {e:?}"))?;
+
+    service.waiting().await?;
+    Ok(())
 }
