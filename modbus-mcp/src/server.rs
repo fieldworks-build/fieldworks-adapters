@@ -13,6 +13,7 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use serde_json::json;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::net::lookup_host;
 use tokio_modbus::client::{tcp, Client, Reader, Writer};
@@ -316,8 +317,8 @@ impl ModbusMcpServer {
 
         let timeout_dur = Duration::from_millis(timeout_ms.unwrap_or(5000) as u64);
 
-        let mut addrs = match lookup_host((host.as_str(), port)).await {
-            Ok(a) => a,
+        let addrs: Vec<SocketAddr> = match lookup_host((host.as_str(), port)).await {
+            Ok(a) => a.collect(),
             Err(e) => {
                 return Ok(fw_error(AdapterError {
                     code: ErrorCode::ConnectionError,
@@ -326,19 +327,30 @@ impl ModbusMcpServer {
                 }));
             }
         };
-        let addr = match addrs.next() {
-            Some(a) => a,
-            None => {
-                return Ok(fw_error(AdapterError {
-                    code: ErrorCode::ConnectionError,
-                    message: format!("No addresses found for {host}:{port}"),
-                    tag_id: None,
-                }));
+        if addrs.is_empty() {
+            return Ok(fw_error(AdapterError {
+                code: ErrorCode::ConnectionError,
+                message: format!("No addresses found for {host}:{port}"),
+                tag_id: None,
+            }));
+        }
+
+        // A hostname can resolve to multiple addresses (e.g. "localhost" to
+        // both ::1 and 127.0.0.1) — try each in turn rather than assuming
+        // the first one is reachable. The whole attempt, across every
+        // address, is bounded by the single timeout below.
+        let connect_attempt = async {
+            let mut last_err = None;
+            for addr in &addrs {
+                match tcp::connect_slave(*addr, Slave(slave_id)).await {
+                    Ok(ctx) => return Ok(ctx),
+                    Err(e) => last_err = Some(e),
+                }
             }
+            Err(last_err.expect("addrs is non-empty, so at least one attempt ran"))
         };
 
-        let connect_result =
-            tokio::time::timeout(timeout_dur, tcp::connect_slave(addr, Slave(slave_id))).await;
+        let connect_result = tokio::time::timeout(timeout_dur, connect_attempt).await;
 
         let ctx = match connect_result {
             Err(_) => {
@@ -354,7 +366,10 @@ impl ModbusMcpServer {
             Ok(Err(e)) => {
                 return Ok(fw_error(AdapterError {
                     code: ErrorCode::ConnectionError,
-                    message: format!("Failed to connect to {host}:{port} — {e}"),
+                    message: format!(
+                        "Failed to connect to {host}:{port} (tried {} address(es)) — {e}",
+                        addrs.len()
+                    ),
                     tag_id: None,
                 }));
             }
