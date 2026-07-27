@@ -165,6 +165,17 @@ write_permissions:
     units: "Hz"
 ```
 
+**Local testing:** `opcua-mcp/sim/` ships a fixture OPC-UA server (asyncua-based) for exercising the adapter without real hardware:
+
+```bash
+pip install -r opcua-mcp/sim/requirements.txt
+python opcua-mcp/sim/simulator.py --port 4860
+```
+
+`opcua-mcp/sim/topology.yaml` matches the simulator's fixture nodes (`Pump01.FlowRate` = 312.7, historized with a few seed points; `Pump01.Running` = true; `Pump01.SpeedSetpoint` writable 0-60) — copy it next to the binary to exercise `discover_tags`, `write_tag`, and `read_tag_history` against known values. This is also what `.github/workflows/test.yml`'s conformance job stands up for CI. Connect with `--host 127.0.0.1`, not `localhost` — see the note below.
+
+**Known limitation:** `async-opcua`'s TCP transport only tries the first DNS-resolved address for a hostname and doesn't fall back — on Linux, `localhost` resolves to `::1` first, so connecting by that name fails unless something is actually listening on IPv6. This lives inside the `async-opcua` crate itself, not opcua-mcp's code, so it isn't something to patch here; use a literal IP when in doubt.
+
 **Security note:** When using `Sign` or `SignAndEncrypt`, the adapter auto-generates a self-signed certificate in `./pki/`. The server must trust this certificate before the connection will succeed. For `SecurityMode::None`, certificate validation is skipped automatically.
 
 ## modbus-mcp
@@ -244,13 +255,13 @@ Shared library crate. Contains:
 cargo test --workspace
 ```
 
-**106 pure-logic unit tests** run without any broker or server:
+**112 pure-logic unit tests** run without any broker or server:
 
 | Crate | Tests | What's covered |
 |-------|-------|----------------|
 | `fieldworks-adapter-core` | 10 | Quality/TagValue/ErrorCode/Vqt/WriteValue serialization — snake_case, SCREAMING_SNAKE_CASE, untagged |
 | `mqtt-mcp` | 25 | `parse_mqtt_payload` (JSON paths, bool aliases, raw numeric, string fallback), `str_to_quality`, `build_topic_tree`, `validate_write` (range, units, type checks) |
-| `opcua-mcp` | 26 | `parse_node_id`, `variant_to_tag_value` (all numeric arms, bool, string), `status_code_to_quality`, `data_value_to_vqt`, `validate_write` |
+| `opcua-mcp` | 32 | `parse_node_id`, `variant_to_tag_value` (all numeric arms, bool, string), `status_code_to_quality`, `data_value_to_vqt`, `validate_write`, `is_node_id_unknown`/`map_write_status_code` (status code regression tests) |
 | `modbus-mcp` | 45 | `parse_tag_id`, `registers_to_value`/`value_to_registers` (round trips incl. float32/int32 endianness), `map_exception_code`, `build_tag_tree`, `validate_write` |
 
 **Integration tests** (connection-dependent) are gated by environment variables. Set `MQTT_TEST_HOST` or `OPCUA_TEST_HOST` to run them against a live broker:
@@ -260,9 +271,9 @@ MQTT_TEST_HOST=localhost cargo test -p mqtt-mcp
 OPCUA_TEST_HOST=opc.tcp://localhost:4840 cargo test -p opcua-mcp
 ```
 
-**modbus-mcp** doesn't have a Rust-level integration test — its connection-dependent behavior is exercised through the `fieldworks test-adapter` conformance CLI against the fixture simulator in `modbus-mcp/sim/` (see the modbus-mcp section above). CI runs this the same way it does for mqtt-mcp's live Mosquitto broker.
+**modbus-mcp and opcua-mcp** don't have Rust-level integration tests — their connection-dependent behavior is exercised through the `fieldworks test-adapter` conformance CLI against the fixture simulators in `modbus-mcp/sim/` and `opcua-mcp/sim/` (see their sections above). CI runs this the same way it does for mqtt-mcp's live Mosquitto broker.
 
-CI runs the unit-only suite on every push via `.github/workflows/test.yml`; the conformance job additionally runs live connection-dependent checks for mqtt-mcp and modbus-mcp.
+CI runs the unit-only suite on every push via `.github/workflows/test.yml`; the conformance job additionally runs live connection-dependent checks for all three of mqtt-mcp, opcua-mcp, and modbus-mcp.
 
 ## Building
 

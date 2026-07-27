@@ -1,0 +1,36 @@
+# Fixture topology matching simulator.py's fixed nodes. Copy this next to
+# the opcua-mcp binary (or point --cwd at this directory) to exercise
+# discover_tags / write_permissions against the simulator.
+tags:
+  - tag_id: "ns=2;s=Pump01.FlowRate"
+    name: "Pump 01 Flow Rate"
+    units: "m3/h"
+    data_type: "float"
+    writable: false
+    process_area: "test_area"
+    equipment_id: "pump_01"
+    normal_range:
+      min: 0.0
+      max: 500.0
+  - tag_id: "ns=2;s=Pump01.Running"
+    name: "Pump 01 Running"
+    data_type: "boolean"
+    writable: false
+    process_area: "test_area"
+    equipment_id: "pump_01"
+  - tag_id: "ns=2;s=Pump01.SpeedSetpoint"
+    name: "Pump 01 Speed Setpoint"
+    units: "Hz"
+    data_type: "float"
+    writable: true
+    process_area: "test_area"
+    equipment_id: "pump_01"
+    normal_range:
+      min: 0.0
+      max: 60.0
+
+write_permissions:
+  "ns=2;s=Pump01.SpeedSetpoint":
+    min: 0.0
+    max: 60.0
+    units: "Hz"

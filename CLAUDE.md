@@ -20,7 +20,7 @@ Requires **Rust 1.75+** (stable async fn in traits).
 ## Testing
 
 ```bash
-# Unit tests — no infrastructure required (106 tests, always run these)
+# Unit tests — no infrastructure required (112 tests, always run these)
 cargo test --workspace
 
 # Integration tests — need a live broker
@@ -28,7 +28,7 @@ MQTT_TEST_HOST=localhost cargo test -p mqtt-mcp
 OPCUA_TEST_HOST=opc.tcp://localhost:4840 cargo test -p opcua-mcp
 ```
 
-`modbus-mcp` has no Rust-level integration test — its connection-dependent behavior is exercised via the `fieldworks test-adapter` CLI against the fixture simulator in `modbus-mcp/sim/` (`python modbus-mcp/sim/simulator.py --port 5502`). CI wires this the same way it does mqtt-mcp's live Mosquitto broker.
+`modbus-mcp` and `opcua-mcp` have no Rust-level integration test — their connection-dependent behavior is exercised via the `fieldworks test-adapter` CLI against the fixture simulators in `modbus-mcp/sim/` and `opcua-mcp/sim/` (`python <adapter>/sim/simulator.py --port <port>`). CI wires both the same way it does mqtt-mcp's live Mosquitto broker. opcua-mcp's simulator must be reached via `127.0.0.1`, not `localhost` — `async-opcua`'s TCP transport doesn't fall back past the first DNS-resolved address, and `localhost` resolves to `::1` first on Linux.
 
 CI runs unit-only suite on every push. Don't break `cargo test --workspace`.
 
@@ -38,7 +38,7 @@ CI runs unit-only suite on every push. Don't break `cargo test --workspace`.
 |---|---|
 | `fieldworks-adapter-core` | Complete — shared types, VQT envelope, `FieldworksAdapter` trait |
 | `mqtt-mcp` | Complete — MQTT v3.1.1/v5.0, 25 unit tests |
-| `opcua-mcp` | Complete — OPC-UA via async-opcua 0.18, 26 unit tests |
+| `opcua-mcp` | Complete — OPC-UA via async-opcua 0.18, 32 unit tests. `sim/` has a fixture asyncua server for local/CI testing |
 | `modbus-mcp` | Complete — Modbus TCP via tokio-modbus 0.17, 45 unit tests. `sim/` has a fixture pymodbus simulator for local/CI testing |
 | `dnp3-mcp` | Stub — deferred, no viable OSS Rust DNP3 crate exists (see fieldworks-adapters#6) |
 | `ethernetip-mcp` | Stub |

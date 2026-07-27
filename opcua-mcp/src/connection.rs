@@ -169,6 +169,32 @@ pub fn status_code_to_quality(code: Option<StatusCode>) -> Quality {
     }
 }
 
+// Verified against async-opcua-types 0.18.0's status_code.rs — do not
+// change these without re-checking the source. Two similar-looking values
+// (0x80350000 = BadAttributeIdInvalid, 0x806F0000 = BadNoMatch) previously
+// sat in write_tag's mapping under these names and never matched anything.
+const BAD_NODE_ID_UNKNOWN: u32 = 0x8034_0000;
+const BAD_NOT_WRITABLE: u32 = 0x803B_0000;
+
+/// True when a read's per-item status means the NodeId doesn't refer to
+/// anything in the server's address space — TAG_NOT_FOUND territory, not a
+/// VQT with quality=bad (which is what every other Bad status represents:
+/// a real reading the server says not to trust).
+pub fn is_node_id_unknown(status: Option<StatusCode>) -> bool {
+    status.is_some_and(|sc| sc.bits() == BAD_NODE_ID_UNKNOWN)
+}
+
+/// Maps a write rejection's status code to the framework ErrorCode.
+pub fn map_write_status_code(sc: StatusCode) -> ErrorCode {
+    if sc.bits() == BAD_NOT_WRITABLE {
+        ErrorCode::TagNotWritable
+    } else if sc.bits() == BAD_NODE_ID_UNKNOWN {
+        ErrorCode::TagNotFound
+    } else {
+        ErrorCode::ConnectionError
+    }
+}
+
 pub fn variant_to_tag_value(v: &Variant) -> TagValue {
     match v {
         Variant::Boolean(b) => TagValue::Bool(*b),
@@ -635,6 +661,63 @@ mod tests {
         assert_eq!(
             status_code_to_quality(Some(StatusCode::BadNodeIdInvalid)),
             Quality::Bad
+        );
+    }
+
+    // ── is_node_id_unknown / map_write_status_code ───────────────────────────
+    //
+    // Regression tests for a real bug: the two hex constants that used to
+    // live inline in server.rs (0x80350000, 0x806F0000) were verified against
+    // async-opcua-types 0.18.0's status_code.rs to actually be
+    // BadAttributeIdInvalid and BadNoMatch — neither is BadNodeIdUnknown or
+    // BadNotWritable, so the mapping they were meant to implement had never
+    // actually matched a real server response.
+
+    #[test]
+    fn node_id_unknown_matches_the_real_status_code() {
+        assert!(is_node_id_unknown(Some(StatusCode::BadNodeIdUnknown)));
+    }
+
+    #[test]
+    fn node_id_unknown_rejects_similar_looking_codes() {
+        // These are the two previously-wrong constants, kept as an explicit
+        // regression check against reintroducing the mix-up.
+        assert!(!is_node_id_unknown(Some(StatusCode::BadAttributeIdInvalid)));
+        assert!(!is_node_id_unknown(Some(StatusCode::BadNoMatch)));
+    }
+
+    #[test]
+    fn node_id_unknown_rejects_other_bad_status_and_none() {
+        assert!(!is_node_id_unknown(Some(StatusCode::BadNodeIdInvalid)));
+        assert!(!is_node_id_unknown(None));
+        assert!(!is_node_id_unknown(Some(StatusCode::Good)));
+    }
+
+    #[test]
+    fn write_status_not_writable_maps_correctly() {
+        assert_eq!(
+            map_write_status_code(StatusCode::BadNotWritable),
+            ErrorCode::TagNotWritable
+        );
+    }
+
+    #[test]
+    fn write_status_node_id_unknown_maps_correctly() {
+        assert_eq!(
+            map_write_status_code(StatusCode::BadNodeIdUnknown),
+            ErrorCode::TagNotFound
+        );
+    }
+
+    #[test]
+    fn write_status_other_bad_codes_map_to_connection_error() {
+        assert_eq!(
+            map_write_status_code(StatusCode::BadAttributeIdInvalid),
+            ErrorCode::ConnectionError
+        );
+        assert_eq!(
+            map_write_status_code(StatusCode::BadNoMatch),
+            ErrorCode::ConnectionError
         );
     }
 

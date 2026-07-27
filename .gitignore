@@ -2,3 +2,4 @@
 write_audit.jsonl
 __pycache__/
 *.pyc
+pki/

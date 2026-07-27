@@ -2,9 +2,9 @@
 
 use crate::connection::{
     browse_flat, browse_tree, data_value_to_vqt, establish_session, extract_history_data,
-    load_topology, log_write_audit, make_history_read_details, make_history_value_id,
-    make_opc_write_value, make_read_value_id, now_iso, parse_node_id, topology_tag_to_descriptor,
-    validate_write, OpcUaConnection,
+    is_node_id_unknown, load_topology, log_write_audit, make_history_read_details,
+    make_history_value_id, make_opc_write_value, make_read_value_id, map_write_status_code,
+    now_iso, parse_node_id, topology_tag_to_descriptor, validate_write, OpcUaConnection,
 };
 use async_opcua::{
     client::IdentityToken,
@@ -426,6 +426,21 @@ impl OpcUaMcpServer {
         };
 
         match dvs.pop() {
+            // BadNodeIdUnknown means the NodeId doesn't refer to anything in
+            // the server's address space — that's TAG_NOT_FOUND, not a VQT
+            // with quality=bad. Every other Bad status (device failure,
+            // sensor fault, comm loss downstream of the OPC-UA server, etc.)
+            // is a real reading the server is telling us not to trust, which
+            // is exactly what VQT's Bad quality exists to represent — those
+            // still return a VQT, not an error.
+            Some(dv) if is_node_id_unknown(dv.status) => Ok(fw_error(AdapterError {
+                code: ErrorCode::TagNotFound,
+                message: format!(
+                    "NodeId '{}' does not exist on the server (BadNodeIdUnknown)",
+                    p.tag_id
+                ),
+                tag_id: Some(p.tag_id),
+            })),
             Some(dv) => Ok(CallToolResult::structured(
                 serde_json::to_value(data_value_to_vqt(&p.tag_id, &dv, &units)).unwrap(),
             )),
@@ -596,17 +611,8 @@ impl OpcUaMcpServer {
 
         if let Some(sc) = status_codes.first() {
             if sc.is_bad() {
-                let code = if sc.bits() == 0x806F0000 {
-                    // BadNotWritable
-                    ErrorCode::TagNotWritable
-                } else if sc.bits() == 0x80350000 {
-                    // BadNodeIdUnknown
-                    ErrorCode::TagNotFound
-                } else {
-                    ErrorCode::ConnectionError
-                };
                 return Ok(fw_error(AdapterError {
-                    code,
+                    code: map_write_status_code(*sc),
                     message: format!("write rejected by server: {sc}"),
                     tag_id: Some(p.tag_id),
                 }));

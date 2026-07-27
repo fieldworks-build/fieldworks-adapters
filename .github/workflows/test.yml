@@ -100,18 +100,29 @@ jobs:
             sleep 1
           done
 
+      - name: Start OPC-UA simulator (fixture server, conformance testing only)
+        run: |
+          pip install -r opcua-mcp/sim/requirements.txt
+          python opcua-mcp/sim/simulator.py --port 4860 &
+          for i in $(seq 1 10); do
+            (echo > /dev/tcp/127.0.0.1/4860) >/dev/null 2>&1 && break
+            sleep 1
+          done
+
       - name: fieldworks test-adapter — mqtt-mcp (static + live connection)
         run: |
           fieldworks test-adapter --command "./target/debug/mqtt-mcp" \
             --host localhost --port 1883
 
-      - name: fieldworks test-adapter — opcua-mcp (static only)
-        # No live OPC-UA server in this job yet — static checks (tool
-        # discovery, get_server_info shape) still run unconditionally.
-        # Connection-dependent checks need a live server; follow up
-        # separately once one's easy to stand up in CI.
+      - name: fieldworks test-adapter — opcua-mcp (static + live connection)
+        # 127.0.0.1, not localhost: async-opcua's TCP transport only tries
+        # the first DNS-resolved address and doesn't fall back — on Linux
+        # "localhost" resolves to ::1 first, which nothing is listening on.
+        # This lives inside the async-opcua crate, not opcua-mcp's own code,
+        # so it's not something to patch here.
         run: |
-          fieldworks test-adapter --command "./target/debug/opcua-mcp"
+          fieldworks test-adapter --command "./target/debug/opcua-mcp" \
+            --host 127.0.0.1 --port 4860
 
       - name: fieldworks test-adapter — modbus-mcp (static + live connection)
         run: |
