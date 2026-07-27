@@ -167,6 +167,66 @@ write_permissions:
 
 **Security note:** When using `Sign` or `SignAndEncrypt`, the adapter auto-generates a self-signed certificate in `./pki/`. The server must trust this certificate before the connection will succeed. For `SecurityMode::None`, certificate validation is skipped automatically.
 
+## modbus-mcp
+
+Modbus TCP client adapter using [tokio-modbus](https://crates.io/crates/tokio-modbus) 0.17.
+
+**Build and run:**
+
+```bash
+cargo build -p modbus-mcp
+RUST_LOG=info ./target/debug/modbus-mcp
+```
+
+**Tag IDs encode register type, address, and (for registers) an optional data type:**
+
+```
+holding:100          ← holding register, uint16 (default when omitted)
+holding:100:float32  ← holding register, float32 (spans 2 registers, big-endian word order)
+input:5              ← input register (read-only)
+coil:5               ← coil
+discrete:3           ← discrete input (read-only)
+```
+
+Input registers and discrete inputs have no write function code in the Modbus spec — `write_tag` against either always returns `TAG_NOT_WRITABLE`, independent of `topology.yaml`.
+
+**Protocol-specific tools:**
+
+| Tool | Description |
+|------|-------------|
+| `scan` | Active read of a contiguous address range for a given register type (max 125 for holding/input, 2000 for coil/discrete — Modbus protocol limits) |
+| `get_topic_tree` | `topology.yaml` tags grouped by register type. Purely config-derived, no live I/O |
+
+**Optional topology.yaml** — same schema as mqtt-mcp, with `register_type:address[:data_type]` strings as `tag_id` values:
+
+```yaml
+tags:
+  - tag_id: "holding:100:float32"
+    name: "Pump 01 Flow Rate"
+    units: "m3/h"
+    data_type: "float32"
+    writable: false
+    process_area: "raw_water"
+    equipment_id: "pump_01"
+
+write_permissions:
+  "holding:210":
+    min: 0.0
+    max: 100.0
+    units: "Hz"
+```
+
+**Local testing:** `modbus-mcp/sim/` ships a fixture Modbus TCP simulator (pymodbus-based) for exercising the adapter without real hardware:
+
+```bash
+pip install -r modbus-mcp/sim/requirements.txt
+python modbus-mcp/sim/simulator.py --port 5502
+```
+
+`modbus-mcp/sim/topology.yaml` matches the simulator's fixture values (`holding:100` = 1234, `holding:200:float32` = 312.7, `holding:210` writable 0-100, `input:5` = 777, `coil:5`/`discrete:3` = true) — copy it next to the binary to exercise `discover_tags` and `write_tag` against known values. This is also what `.github/workflows/test.yml`'s conformance job stands up for CI.
+
+**No auto-reconnect** (tokio-modbus doesn't provide one) — a connection-level failure drops the held connection; call `connect` again. Every call is wrapped in a timeout since tokio-modbus has none natively.
+
 ## fieldworks-adapter-core
 
 Shared library crate. Contains:
@@ -184,13 +244,14 @@ Shared library crate. Contains:
 cargo test --workspace
 ```
 
-**61 pure-logic unit tests** run without any broker or server:
+**106 pure-logic unit tests** run without any broker or server:
 
 | Crate | Tests | What's covered |
 |-------|-------|----------------|
 | `fieldworks-adapter-core` | 10 | Quality/TagValue/ErrorCode/Vqt/WriteValue serialization — snake_case, SCREAMING_SNAKE_CASE, untagged |
 | `mqtt-mcp` | 25 | `parse_mqtt_payload` (JSON paths, bool aliases, raw numeric, string fallback), `str_to_quality`, `build_topic_tree`, `validate_write` (range, units, type checks) |
 | `opcua-mcp` | 26 | `parse_node_id`, `variant_to_tag_value` (all numeric arms, bool, string), `status_code_to_quality`, `data_value_to_vqt`, `validate_write` |
+| `modbus-mcp` | 45 | `parse_tag_id`, `registers_to_value`/`value_to_registers` (round trips incl. float32/int32 endianness), `map_exception_code`, `build_tag_tree`, `validate_write` |
 
 **Integration tests** (connection-dependent) are gated by environment variables. Set `MQTT_TEST_HOST` or `OPCUA_TEST_HOST` to run them against a live broker:
 
@@ -199,7 +260,9 @@ MQTT_TEST_HOST=localhost cargo test -p mqtt-mcp
 OPCUA_TEST_HOST=opc.tcp://localhost:4840 cargo test -p opcua-mcp
 ```
 
-CI runs the unit-only suite on every push via `.github/workflows/test.yml`.
+**modbus-mcp** doesn't have a Rust-level integration test — its connection-dependent behavior is exercised through the `fieldworks test-adapter` conformance CLI against the fixture simulator in `modbus-mcp/sim/` (see the modbus-mcp section above). CI runs this the same way it does for mqtt-mcp's live Mosquitto broker.
+
+CI runs the unit-only suite on every push via `.github/workflows/test.yml`; the conformance job additionally runs live connection-dependent checks for mqtt-mcp and modbus-mcp.
 
 ## Building
 

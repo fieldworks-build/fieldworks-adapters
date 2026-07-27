@@ -1,0 +1,51 @@
+# Fixture topology matching simulator.py's fixed values. Copy this next to
+# the modbus-mcp binary (or point --cwd at this directory) to exercise
+# discover_tags / write_permissions against the simulator.
+tags:
+  - tag_id: "holding:100"
+    name: "Test Uint16"
+    units: "count"
+    data_type: "uint16"
+    writable: false
+    process_area: "test_area"
+    equipment_id: "sim_01"
+    normal_range:
+      min: 0.0
+      max: 9999.0
+  - tag_id: "holding:200:float32"
+    name: "Test Float32"
+    units: "m3/h"
+    data_type: "float32"
+    writable: false
+    process_area: "test_area"
+    equipment_id: "sim_01"
+  - tag_id: "holding:210"
+    name: "Test Setpoint"
+    units: "Hz"
+    data_type: "uint16"
+    writable: true
+    process_area: "test_area"
+    equipment_id: "sim_01"
+    normal_range:
+      min: 0.0
+      max: 100.0
+  - tag_id: "input:5"
+    name: "Test Input Register"
+    units: "count"
+    data_type: "uint16"
+    process_area: "test_area"
+    equipment_id: "sim_01"
+  - tag_id: "coil:5"
+    name: "Test Coil"
+    process_area: "test_area"
+    equipment_id: "sim_01"
+  - tag_id: "discrete:3"
+    name: "Test Discrete Input"
+    process_area: "test_area"
+    equipment_id: "sim_01"
+
+write_permissions:
+  "holding:210":
+    min: 0.0
+    max: 100.0
+    units: "Hz"
