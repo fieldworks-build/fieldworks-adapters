@@ -69,10 +69,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build mqtt-mcp and opcua-mcp
+      - name: Build mqtt-mcp, opcua-mcp, and modbus-mcp
         run: |
           cargo build -p mqtt-mcp
           cargo build -p opcua-mcp
+          cargo build -p modbus-mcp
 
       - uses: actions/setup-python@v6.3.0
         with:
@@ -90,6 +91,15 @@ jobs:
             sleep 1
           done
 
+      - name: Start Modbus simulator (fixture device, conformance testing only)
+        run: |
+          pip install -r modbus-mcp/sim/requirements.txt
+          python modbus-mcp/sim/simulator.py --port 5502 &
+          for i in $(seq 1 10); do
+            (echo > /dev/tcp/127.0.0.1/5502) >/dev/null 2>&1 && break
+            sleep 1
+          done
+
       - name: fieldworks test-adapter — mqtt-mcp (static + live connection)
         run: |
           fieldworks test-adapter --command "./target/debug/mqtt-mcp" \
@@ -102,3 +112,8 @@ jobs:
         # separately once one's easy to stand up in CI.
         run: |
           fieldworks test-adapter --command "./target/debug/opcua-mcp"
+
+      - name: fieldworks test-adapter — modbus-mcp (static + live connection)
+        run: |
+          fieldworks test-adapter --command "./target/debug/modbus-mcp" \
+            --host localhost --port 5502
