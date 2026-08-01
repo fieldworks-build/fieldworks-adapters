@@ -866,7 +866,7 @@ impl ServerHandler for ModbusMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_instructions(
                 "FieldWorks Modbus TCP adapter. Exposes Modbus holding/input registers and \
                  coil/discrete-input data through the standard nine-tool FieldWorks interface. \
