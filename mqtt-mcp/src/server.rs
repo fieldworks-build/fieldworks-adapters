@@ -756,7 +756,7 @@ impl ServerHandler for MqttMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_instructions(
                 "FieldWorks MQTT adapter. Exposes MQTT process data through the standard \
                  nine-tool FieldWorks interface. Call connect before any data operations."
