@@ -1,10 +1,11 @@
 [package]
 name = "fieldworks-adapter-core"
-version = "1.0.3"
+version = "1.0.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared types, VQT envelope, and error taxonomy for FieldWorks industrial protocol adapters"
+readme = "README.md"
 keywords = ["mcp", "iot", "industrial", "scada"]
 categories = ["network-programming", "hardware-support"]
 
