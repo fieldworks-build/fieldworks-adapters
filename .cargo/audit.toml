@@ -1,0 +1,15 @@
+# cargo-audit loads this automatically from .cargo/audit.toml; CI runs a
+# bare `cargo audit`, so this file is the only ignore list.
+[advisories]
+# Transitive deps with no available fix.
+ignore = [
+    "RUSTSEC-2023-0071",  # rsa — Marvin Attack, transitive via async-opcua 0.18, no upstream fix
+    # rustls-webpki 0.102: rumqttc 0.25 depends on it directly (its rustls
+    # 0.23 already uses a patched 0.103). Drop these when rumqttc moves to
+    # webpki 0.103 — see fieldworks-adapters#17.
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0382",
+]

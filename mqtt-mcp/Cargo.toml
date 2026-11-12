@@ -1,6 +1,6 @@
 [package]
 name = "mqtt-mcp"
-version = "1.0.5"
+version = "1.0.6"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,7 +13,7 @@ categories = ["network-programming", "hardware-support"]
 # path (local workspace builds) + version (once published) — see fieldworks-adapters#3.
 fieldworks-adapter-core = { path = "../fieldworks-adapter-core", version = "1.0" }
 rmcp = { version = "3.9", features = ["transport-io", "schemars"] }
-rumqttc = "0.24"
+rumqttc = "0.25"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
