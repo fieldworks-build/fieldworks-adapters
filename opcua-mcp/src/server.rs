@@ -14,7 +14,7 @@ use chrono::{SecondsFormat, Utc};
 use fieldworks_adapter_core::*;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerConfig},
     schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use serde::Deserialize;
@@ -720,8 +720,8 @@ impl OpcUaMcpServer {
 
 #[tool_handler]
 impl ServerHandler for OpcUaMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
             .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_instructions(

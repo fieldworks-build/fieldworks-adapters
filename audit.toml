@@ -6,4 +6,7 @@ ignore = [
     "RUSTSEC-2026-0049",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
     "RUSTSEC-2026-0098",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
     "RUSTSEC-2026-0099",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22
+    "RUSTSEC-2026-0382",  # rustls-webpki — transitive via rumqttc 0.24 -> rustls 0.22; rumqttc 0.25 still pins webpki 0.102
+    "RUSTSEC-2026-0349",  # rustls 0.22 — transitive via rumqttc 0.24; fixed in rustls 0.23.46 (rumqttc 0.25)
+    "RUSTSEC-2026-0346",  # rustls 0.22 — transitive via rumqttc 0.24; fixed in rustls 0.23.46 (rumqttc 0.25)
 ]
