@@ -168,7 +168,13 @@ impl OpcUaMcpServer {
     // ── connect ───────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Establish an OPC-UA session. Supports SecurityMode None/Sign/SignAndEncrypt and Anonymous or Username/Password identity. Tag IDs are OPC-UA NodeId strings (e.g. ns=2;s=Pump01.FlowRate)."
+        description = "Establish an OPC-UA session. Supports SecurityMode None/Sign/SignAndEncrypt and Anonymous or Username/Password identity. Tag IDs are OPC-UA NodeId strings (e.g. ns=2;s=Pump01.FlowRate).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn connect(
         &self,
@@ -250,7 +256,13 @@ impl OpcUaMcpServer {
     // ── disconnect ────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Close the OPC-UA session cleanly, sending a CloseSession request to the server."
+        description = "Close the OPC-UA session cleanly, sending a CloseSession request to the server.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn disconnect(
         &self,
@@ -273,7 +285,8 @@ impl OpcUaMcpServer {
     // ── discover_tags ─────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Return tag descriptors from topology.yaml. Returns an empty list if no topology is loaded — run browse or get_node_tree to explore the address space."
+        description = "Return tag descriptors from topology.yaml. Returns an empty list if no topology is loaded — run browse or get_node_tree to explore the address space.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn discover_tags(
         &self,
@@ -301,7 +314,8 @@ impl OpcUaMcpServer {
     // ── browse ────────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Browse the OPC-UA address space from a starting node. Returns child nodes with their NodeId, browse name, display name, and node class. Use discover_tags for tag metadata."
+        description = "Browse the OPC-UA address space from a starting node. Returns child nodes with their NodeId, browse name, display name, and node class. Use discover_tags for tag metadata.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn browse(
         &self,
@@ -347,7 +361,8 @@ impl OpcUaMcpServer {
     // ── get_node_tree ─────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Return a nested view of the OPC-UA address space. Intentionally slow — use only for topology onboarding. Hard cap: 1000 nodes. Use browse for incremental exploration."
+        description = "Return a nested view of the OPC-UA address space. Intentionally slow — use only for topology onboarding. Hard cap: 1000 nodes. Use browse for incremental exploration.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_node_tree(
         &self,
@@ -385,7 +400,8 @@ impl OpcUaMcpServer {
     // ── read_tag ──────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Read the current value of an OPC-UA Variable node by NodeId. Returns a VQT envelope with status code mapped to quality (Good/Uncertain/Bad)."
+        description = "Read the current value of an OPC-UA Variable node by NodeId. Returns a VQT envelope with status code mapped to quality (Good/Uncertain/Bad).",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn read_tag(
         &self,
@@ -455,7 +471,8 @@ impl OpcUaMcpServer {
     // ── read_tag_history ──────────────────────────────────────────────────────
 
     #[tool(
-        description = "Read historical values for an OPC-UA node that exposes HistoricalAccess. Returns HISTORY_UNAVAILABLE if the server does not support history for this node."
+        description = "Read historical values for an OPC-UA node that exposes HistoricalAccess. Returns HISTORY_UNAVAILABLE if the server does not support history for this node.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn read_tag_history(
         &self,
@@ -560,7 +577,12 @@ impl OpcUaMcpServer {
     // ── write_tag ─────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Write a value to an OPC-UA Variable node. Gated by topology write_permissions. Requires operator_id and reason for audit trail."
+        description = "Write a value to an OPC-UA Variable node. Gated by topology write_permissions. Requires operator_id and reason for audit trail.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn write_tag(
         &self,
@@ -650,7 +672,8 @@ impl OpcUaMcpServer {
     // ── get_server_info ───────────────────────────────────────────────────────
 
     #[tool(
-        description = "Return OPC-UA server metadata, connection state, and supported capabilities."
+        description = "Return OPC-UA server metadata, connection state, and supported capabilities.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_server_info(&self) -> Result<CallToolResult, McpError> {
         let guard = self.inner.lock().await;
@@ -708,5 +731,39 @@ impl ServerHandler for OpcUaMcpServer {
                  Use browse or get_node_tree to discover available nodes."
                     .to_string(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Clients gate on these hints (fieldworks-adapters#15): an unannotated
+    // tool counts as a possible plant write under MCP's defaults.
+    #[test]
+    fn tool_annotations_declare_read_only_and_destructive() {
+        let tools = OpcUaMcpServer::new().tool_router.list_all();
+        assert_eq!(tools.len(), 9);
+        for tool in tools {
+            let a = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+            assert_eq!(a.open_world_hint, Some(true), "{}", tool.name);
+            match tool.name.as_ref() {
+                "connect" | "disconnect" => {
+                    assert_eq!(a.read_only_hint, Some(false), "{}", tool.name);
+                    assert_eq!(a.destructive_hint, Some(false), "{}", tool.name);
+                }
+                "write_tag" => {
+                    assert_eq!(a.read_only_hint, Some(false));
+                    assert_eq!(a.destructive_hint, Some(true));
+                    // A repeated write isn't always a no-op (MQTT publishes
+                    // an event at QoS 1), so don't invite client retries.
+                    assert_eq!(a.idempotent_hint, None);
+                }
+                _ => assert_eq!(a.read_only_hint, Some(true), "{}", tool.name),
+            }
+        }
     }
 }

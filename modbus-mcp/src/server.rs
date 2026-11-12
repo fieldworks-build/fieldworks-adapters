@@ -292,7 +292,13 @@ impl ModbusMcpServer {
     // ── connect ───────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Establish a connection to a Modbus TCP device or gateway. If already connected, the existing connection is replaced."
+        description = "Establish a connection to a Modbus TCP device or gateway. If already connected, the existing connection is replaced.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn connect(
         &self,
@@ -398,7 +404,15 @@ impl ModbusMcpServer {
 
     // ── disconnect ────────────────────────────────────────────────────────────
 
-    #[tool(description = "Cleanly terminate the connection to the Modbus device.")]
+    #[tool(
+        description = "Cleanly terminate the connection to the Modbus device.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn disconnect(
         &self,
         Parameters(DisconnectParams { reason }): Parameters<DisconnectParams>,
@@ -427,7 +441,8 @@ impl ModbusMcpServer {
     // ── discover_tags ─────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Enumerate available tags with metadata from topology.yaml. Modbus has no protocol-native tag discovery — without a topology.yaml, this returns an empty list; use scan to probe live address ranges instead."
+        description = "Enumerate available tags with metadata from topology.yaml. Modbus has no protocol-native tag discovery — without a topology.yaml, this returns an empty list; use scan to probe live address ranges instead.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn discover_tags(
         &self,
@@ -465,7 +480,8 @@ impl ModbusMcpServer {
     #[tool(
         description = "Actively read a contiguous range of a given register type from the live device. \
         Unlike MQTT's passive scan, this is a direct request/response Modbus read — returns immediately \
-        with raw per-address values (no float32/int32 decoding; each entry is one raw register or bit)."
+        with raw per-address values (no float32/int32 decoding; each entry is one raw register or bit).",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn scan(
         &self,
@@ -605,7 +621,8 @@ impl ModbusMcpServer {
 
     #[tool(
         description = "Return the topology.yaml tag set grouped by register type (holding/input/coil/discrete). \
-        Purely config-derived — no live I/O. Use scan for live address-space exploration."
+        Purely config-derived — no live I/O. Use scan for live address-space exploration.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_topic_tree(
         &self,
@@ -624,7 +641,8 @@ impl ModbusMcpServer {
 
     #[tool(
         description = "Read the current value of a single tag. tag_id format: \"register_type:address[:data_type]\", \
-        e.g. \"holding:100\", \"holding:100:float32\", \"coil:5\". Returns a VQT envelope."
+        e.g. \"holding:100\", \"holding:100:float32\", \"coil:5\". Returns a VQT envelope.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn read_tag(
         &self,
@@ -667,10 +685,13 @@ impl ModbusMcpServer {
 
     // ── read_tag_history ──────────────────────────────────────────────────────
 
-    #[tool(description = "Read a time-series for a tag over a defined window. \
+    #[tool(
+        description = "Read a time-series for a tag over a defined window. \
         Modbus has no native history. This adapter returns HISTORY_UNAVAILABLE. \
         Integrate a Modbus-polling historian (e.g. an InfluxDB bridge) and extend \
-        this method to support historical queries.")]
+        this method to support historical queries.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn read_tag_history(
         &self,
         Parameters(ReadTagHistoryParams { tag_id, .. }): Parameters<ReadTagHistoryParams>,
@@ -690,7 +711,12 @@ impl ModbusMcpServer {
         description = "Write a value to a holding register or coil. Input registers and discrete inputs \
         are read-only in Modbus and always return TAG_NOT_WRITABLE. Gated by topology write_permissions — \
         any tag not explicitly listed returns TAG_NOT_WRITABLE. Requires operator_id and reason; both are \
-        logged to write_audit.jsonl."
+        logged to write_audit.jsonl.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn write_tag(
         &self,
@@ -826,7 +852,8 @@ impl ModbusMcpServer {
 
     #[tool(
         description = "Return metadata about this adapter and its current connection state. \
-        Called by Cascade on initialization to discover available protocol surfaces and health."
+        Called by Cascade on initialization to discover available protocol surfaces and health.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_server_info(&self) -> Result<CallToolResult, McpError> {
         let inner = self.inner.lock().await;
@@ -873,5 +900,39 @@ impl ServerHandler for ModbusMcpServer {
                  Call connect before any data operations."
                     .to_string(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Clients gate on these hints (fieldworks-adapters#15): an unannotated
+    // tool counts as a possible plant write under MCP's defaults.
+    #[test]
+    fn tool_annotations_declare_read_only_and_destructive() {
+        let tools = ModbusMcpServer::new().tool_router.list_all();
+        assert_eq!(tools.len(), 9);
+        for tool in tools {
+            let a = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+            assert_eq!(a.open_world_hint, Some(true), "{}", tool.name);
+            match tool.name.as_ref() {
+                "connect" | "disconnect" => {
+                    assert_eq!(a.read_only_hint, Some(false), "{}", tool.name);
+                    assert_eq!(a.destructive_hint, Some(false), "{}", tool.name);
+                }
+                "write_tag" => {
+                    assert_eq!(a.read_only_hint, Some(false));
+                    assert_eq!(a.destructive_hint, Some(true));
+                    // A repeated write isn't always a no-op (MQTT publishes
+                    // an event at QoS 1), so don't invite client retries.
+                    assert_eq!(a.idempotent_hint, None);
+                }
+                _ => assert_eq!(a.read_only_hint, Some(true), "{}", tool.name),
+            }
+        }
     }
 }

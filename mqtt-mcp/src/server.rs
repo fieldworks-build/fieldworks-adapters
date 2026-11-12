@@ -179,7 +179,13 @@ impl MqttMcpServer {
     // ── connect ───────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Establish connection to the MQTT broker. If already connected, the existing connection is replaced."
+        description = "Establish connection to the MQTT broker. If already connected, the existing connection is replaced.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn connect(
         &self,
@@ -301,8 +307,16 @@ impl MqttMcpServer {
 
     // ── disconnect ────────────────────────────────────────────────────────────
 
-    #[tool(description = "Cleanly terminate the connection to the MQTT broker. \
-        Sends MQTT DISCONNECT before closing.")]
+    #[tool(
+        description = "Cleanly terminate the connection to the MQTT broker. \
+        Sends MQTT DISCONNECT before closing.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn disconnect(
         &self,
         Parameters(DisconnectParams { reason }): Parameters<DisconnectParams>,
@@ -340,7 +354,8 @@ impl MqttMcpServer {
     #[tool(
         description = "Enumerate available tags with metadata. Returns topology.yaml tags when present, \
         falling back to the in-memory topic cache populated by scan and read_tag. \
-        Supports optional filtering by process_area or equipment_id."
+        Supports optional filtering by process_area or equipment_id.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn discover_tags(
         &self,
@@ -388,7 +403,8 @@ impl MqttMcpServer {
     #[tool(
         description = "Discover active MQTT topics by subscribing to a wildcard pattern and \
         collecting published messages over a defined observation window. \
-        Returns the set of topics seen during the window with their last VQT."
+        Returns the set of topics seen during the window with their last VQT.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn scan(
         &self,
@@ -455,7 +471,8 @@ impl MqttMcpServer {
     #[tool(
         description = "Return the complete MQTT topic address space as a nested hierarchical object. \
         Intentionally expensive — scans for the full duration. \
-        Use for topology onboarding only, not at query runtime."
+        Use for topology onboarding only, not at query runtime.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_topic_tree(
         &self,
@@ -533,7 +550,8 @@ impl MqttMcpServer {
     #[tool(
         description = "Read the current value of a single tag by its MQTT topic path. \
         Subscribes to the topic, waits for a message (retained or live) within a 10-second \
-        timeout, then unsubscribes. Returns a VQT envelope. Quality is always present."
+        timeout, then unsubscribes. Returns a VQT envelope. Quality is always present.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn read_tag(
         &self,
@@ -604,10 +622,13 @@ impl MqttMcpServer {
 
     // ── read_tag_history ──────────────────────────────────────────────────────
 
-    #[tool(description = "Read a time-series for a tag over a defined window. \
+    #[tool(
+        description = "Read a time-series for a tag over a defined window. \
         MQTT v3.1.1 does not provide native history. This adapter returns \
         HISTORY_UNAVAILABLE. Integrate a MQTT-backed historian (e.g. InfluxDB bridge) \
-        and extend this method to support historical queries.")]
+        and extend this method to support historical queries.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn read_tag_history(
         &self,
         Parameters(ReadTagHistoryParams { tag_id, .. }): Parameters<ReadTagHistoryParams>,
@@ -626,7 +647,12 @@ impl MqttMcpServer {
     #[tool(
         description = "Write a value to an MQTT topic. Gated by topology write_permissions — \
         any tag not explicitly listed in write_permissions returns TAG_NOT_WRITABLE. \
-        Requires operator_id and reason; both are logged to write_audit.jsonl."
+        Requires operator_id and reason; both are logged to write_audit.jsonl.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn write_tag(
         &self,
@@ -708,7 +734,8 @@ impl MqttMcpServer {
 
     #[tool(
         description = "Return metadata about this adapter and its current connection state. \
-        Called by Cascade on initialization to discover available protocol surfaces and health."
+        Called by Cascade on initialization to discover available protocol surfaces and health.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_server_info(&self) -> Result<CallToolResult, McpError> {
         let inner = self.inner.lock().await;
@@ -769,4 +796,38 @@ impl ServerHandler for MqttMcpServer {
 
 fn opt_str<'a>(options: &'a Option<serde_json::Value>, key: &str) -> Option<&'a str> {
     options.as_ref()?.get(key)?.as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Clients gate on these hints (fieldworks-adapters#15): an unannotated
+    // tool counts as a possible plant write under MCP's defaults.
+    #[test]
+    fn tool_annotations_declare_read_only_and_destructive() {
+        let tools = MqttMcpServer::new().tool_router.list_all();
+        assert_eq!(tools.len(), 9);
+        for tool in tools {
+            let a = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+            assert_eq!(a.open_world_hint, Some(true), "{}", tool.name);
+            match tool.name.as_ref() {
+                "connect" | "disconnect" => {
+                    assert_eq!(a.read_only_hint, Some(false), "{}", tool.name);
+                    assert_eq!(a.destructive_hint, Some(false), "{}", tool.name);
+                }
+                "write_tag" => {
+                    assert_eq!(a.read_only_hint, Some(false));
+                    assert_eq!(a.destructive_hint, Some(true));
+                    // A repeated write isn't always a no-op (MQTT publishes
+                    // an event at QoS 1), so don't invite client retries.
+                    assert_eq!(a.idempotent_hint, None);
+                }
+                _ => assert_eq!(a.read_only_hint, Some(true), "{}", tool.name),
+            }
+        }
+    }
 }
