@@ -20,7 +20,7 @@ Requires **Rust 1.75+** (stable async fn in traits).
 ## Testing
 
 ```bash
-# Unit tests — no infrastructure required (112 tests, always run these)
+# Unit tests — no infrastructure required (always run these)
 cargo test --workspace
 
 # Integration tests — need a live broker
@@ -37,9 +37,9 @@ CI runs unit-only suite on every push. Don't break `cargo test --workspace`.
 | Crate | Status |
 |---|---|
 | `fieldworks-adapter-core` | Complete — shared types, VQT envelope, `FieldworksAdapter` trait |
-| `mqtt-mcp` | Complete — MQTT v3.1.1/v5.0, 25 unit tests |
-| `opcua-mcp` | Complete — OPC-UA via async-opcua 0.18, 32 unit tests. `sim/` has a fixture asyncua server for local/CI testing |
-| `modbus-mcp` | Complete — Modbus TCP via tokio-modbus 0.17, 45 unit tests. `sim/` has a fixture pymodbus simulator for local/CI testing |
+| `mqtt-mcp` | Complete — MQTT v3.1.1/v5.0, 26 unit tests |
+| `opcua-mcp` | Complete — OPC-UA via async-opcua 0.18, 33 unit tests. `sim/` has a fixture asyncua server for local/CI testing |
+| `modbus-mcp` | Complete — Modbus TCP via tokio-modbus 0.17, 46 unit tests. `sim/` has a fixture pymodbus simulator for local/CI testing |
 | `dnp3-mcp` | Stub — deferred, no viable OSS Rust DNP3 crate exists (see fieldworks-adapters#6) |
 | `ethernetip-mcp` | Stub |
 | `aveva-mcp` | Stub |
@@ -48,17 +48,19 @@ CI runs unit-only suite on every push. Don't break `cargo test --workspace`.
 
 Every conformant adapter exposes exactly these. The two protocol-specific slots are `scan`/`browse` and `get_topic_tree`/`get_node_tree`.
 
-| Tool | Notes |
-|---|---|
-| `connect` | Establish connection |
-| `disconnect` | Clean close |
-| `discover_tags` | Metadata from topology.yaml or scan cache |
-| `scan` / `browse` † | Protocol-native address-space exploration |
-| `get_topic_tree` / `get_node_tree` † | Full address-space dump for topology onboarding |
-| `read_tag` | Current value with VQT envelope |
-| `read_tag_history` | Historian data; return `HISTORY_UNAVAILABLE` if unsupported |
-| `write_tag` | Setpoint write with operator attribution + audit log |
-| `get_server_info` | Metadata, connection state, capability list |
+Each tool also declares MCP annotations (`#[tool(..., annotations(...))]`), all with `open_world_hint = true`. Clients and mcp-aggregator's `AGGREGATOR_READ_ONLY` gate on them: under MCP defaults an unannotated tool may be destructive. `write_tag` leaves `idempotent_hint` unset — an MQTT write is a QoS 1 publish, which isn't a no-op when repeated. `fieldworks test-adapter` checks the read-only/destructive hints (fieldworks-adapters#15).
+
+| Tool | Annotations | Notes |
+|---|---|---|
+| `connect` | non-destructive, idempotent | Establish connection |
+| `disconnect` | non-destructive, idempotent | Clean close |
+| `discover_tags` | read-only | Metadata from topology.yaml or scan cache |
+| `scan` / `browse` † | read-only | Protocol-native address-space exploration |
+| `get_topic_tree` / `get_node_tree` † | read-only | Full address-space dump for topology onboarding |
+| `read_tag` | read-only | Current value with VQT envelope |
+| `read_tag_history` | read-only | Historian data; return `HISTORY_UNAVAILABLE` if unsupported |
+| `write_tag` | **destructive** | Setpoint write with operator attribution + audit log |
+| `get_server_info` | read-only | Metadata, connection state, capability list |
 
 ## VQT envelope
 

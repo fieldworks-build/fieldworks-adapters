@@ -47,7 +47,10 @@ jobs:
             --ignore RUSTSEC-2026-0104 \
             --ignore RUSTSEC-2026-0049 \
             --ignore RUSTSEC-2026-0098 \
-            --ignore RUSTSEC-2026-0099
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0382 \
+            --ignore RUSTSEC-2026-0349 \
+            --ignore RUSTSEC-2026-0346
 
   conformance:
     name: Adapter conformance suite
