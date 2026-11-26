@@ -75,7 +75,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install fieldworks-core[adapters]
-        run: pip install fieldworks-core[adapters]
+        # 1.7.0 added the known-tag and INVALID_VALUE checks (core#44).
+        run: pip install "fieldworks-core[adapters]>=1.7.0"
 
       - name: Start Mosquitto (anonymous access, conformance testing only)
         run: |
@@ -85,6 +86,9 @@ jobs:
             (echo > /dev/tcp/127.0.0.1/1883) >/dev/null 2>&1 && break
             sleep 1
           done
+          # A retained topic gives mqtt-mcp's known-tag checks something to
+          # read; an empty broker would skip them.
+          docker exec mosquitto mosquitto_pub -r -t Plant/Test/Pump01/Flow -m 42.5
 
       - name: Start Modbus simulator (fixture device, conformance testing only)
         run: |
@@ -104,10 +108,16 @@ jobs:
             sleep 1
           done
 
+      # Every check must run, not skip: a skipped check passes, so a missing
+      # fixture would hide a regression. Each step names the checks it
+      # expects and fails if the report shows any of them as SKIP.
       - name: fieldworks test-adapter — mqtt-mcp (static + live connection)
+        # No INVALID_VALUE check: mqtt-mcp has no fixture topology, so it
+        # refuses every write as TAG_NOT_WRITABLE before checking range.
         run: |
           fieldworks test-adapter --command "./target/debug/mqtt-mcp" \
-            --host localhost --port 1883
+            --host localhost --port 1883 --tag Plant/Test/Pump01/Flow | tee report.txt
+          ! grep -E '^\[SKIP\] (discover_tags|read_tag: known|read_tag_history: known|browse/scan|get_topic_tree)' report.txt
 
       - name: fieldworks test-adapter — opcua-mcp (static + live connection)
         # 127.0.0.1, not localhost: async-opcua's TCP transport only tries
@@ -115,11 +125,24 @@ jobs:
         # "localhost" resolves to ::1 first, which nothing is listening on.
         # This lives inside the async-opcua crate, not opcua-mcp's own code,
         # so it's not something to patch here.
+        #
+        # Runs from sim/ so opcua-mcp loads the fixture topology.yaml: its
+        # tags for discover_tags, and write_permissions (SpeedSetpoint,
+        # 0-60 Hz) for the INVALID_VALUE check.
+        working-directory: opcua-mcp/sim
         run: |
-          fieldworks test-adapter --command "./target/debug/opcua-mcp" \
-            --host 127.0.0.1 --port 4860
+          fieldworks test-adapter --command "$GITHUB_WORKSPACE/target/debug/opcua-mcp" \
+            --host 127.0.0.1 --port 4860 \
+            --write-tag "ns=2;s=Pump01.SpeedSetpoint" --invalid-value 1e9 | tee report.txt
+          ! grep '^\[SKIP\]' report.txt
 
       - name: fieldworks test-adapter — modbus-mcp (static + live connection)
+        # Runs from sim/ for the fixture topology (holding:210 is writable,
+        # 0-100 Hz). Modbus scan needs a register range: --scan-args.
+        working-directory: modbus-mcp/sim
         run: |
-          fieldworks test-adapter --command "./target/debug/modbus-mcp" \
-            --host localhost --port 5502
+          fieldworks test-adapter --command "$GITHUB_WORKSPACE/target/debug/modbus-mcp" \
+            --host localhost --port 5502 \
+            --write-tag holding:210 --invalid-value 1e9 \
+            --scan-args '{"register_type": "holding", "start_address": 100, "count": 4}' | tee report.txt
+          ! grep '^\[SKIP\]' report.txt
